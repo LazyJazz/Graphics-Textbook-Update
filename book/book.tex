@@ -25,11 +25,11 @@
 	basicstyle=\consolas,
     backgroundcolor=\color[RGB]{245,245,244},            % 设定背景颜色
     keywordstyle=\consolas\color[RGB]{40,40,255},                 % 设定关键字颜色
-	numberstyle=\consolas\color{darkgray},           % 设定行号格式
+	numberstyle=\consolas\color[RGB]{0,255,0},           % 设定行号格式
     commentstyle=\hwkaiti\consolas\color[RGB]{0,96,96},                % 设置代码注释的格式
     stringstyle=\consolas\color[RGB]{255,0,0},   % 设置字符串格式
     showstringspaces=false,                              % 不显示字符串中的空格
-%    language=bash,                                        % 设置语言
+    language=c++,                                        % 设置语言
 }
 \onehalfspacing
 \title{\bf\huge 计算机图形学基础教程}
@@ -353,22 +353,264 @@ int main(void)
 }
 \end{lstlisting}
 
-如果所有配置都没有错误，即可看到一个 $640\times 480$ 的窗口，
+如果所有配置都没有错误，即可看到一个 $640\times 480$ 的窗口，如图\ref{fig-gl:hello-window}所示。
 同时，控制台会显示出使用的 GPU 设备型号，制造商，以及支持的 OpenGL 版本信息。
+如下所示：
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width = 0.5\linewidth]{imgs/sec 2.4/hello-window.png}
+    \caption{代码正常运行时应当显示的窗口}
+    \label{fig-gl:hello-window}
+\end{figure}
+
+\begin{lstlisting}
+GPU:         NVIDIA GeForce RTX 3090/PCIe/SSE2
+GPU Vendor:  NVIDIA Corporation
+GL Version:  4.6.0 NVIDIA 497.29
+\end{lstlisting}
+
+以此为例：
+第一行显示使用的显卡名称；
+第二行显示显卡厂商；
+第三行显示 OpenGL 版本，第一个版本号表示 OpenGL 接口支持的版本，
+第二个版本号表示显卡驱动的版本。
+
 如果 OpenGL 未能运行在正确的设备上，
 比如：对于同时具有集成显卡和独立显卡的系统，OpenGL 选择了低性能的集成显卡。
 则可能需要在操作系统中手动设置图形硬件优先级。
 如果发现支持的 OpenGL 版本过低，可能是驱动程序过于老旧，
-应该及时更新最新的驱动程序。
+此时应该及时更新最新的驱动程序。
 如更新驱动程序后问题依旧不能解决，
 则可能是显卡设备本身过于老旧，无法支持新版本的接口，
 但一般不会发生此类情况。
 
 \label{sec-gl:creating-opengl-window}
 
+如果到此处所有功能运行正常，则可顺利进入图形绘制部分代码的编写。
+
 \subsection{绘制三角形}
 
+现代图形 API 普遍以三角形为基本元素进行绘制。
+一般来说，在成功创建窗口后，
+接下来要做的就是绘制一个三角形，
+由此打开通往高性能图形应用开发的大门。
+因此 “Hello, Triangle” 就相当于图形领域的 “Hello，World”，
+成为了使用任何图形接口进行开发的第一课。
+
 \subsubsection{顶点缓冲}
+
+想要绘制一个三角形，
+首先需要定义出这个三角形的样子。
+而定义一个三角形最简单的方法就是给出其三个顶点的位置。
+在二维空间中，三角形的一个顶点可以用一个二元组表示，
+在三维空间中，三角形的一个顶点可以用一个三元组表示；
+但这不是顶点在现代化的图形 API 中真正的表示方法。
+现代图形 API 普遍用一个四元组表示一个三维坐标，
+这种表示法被称作 “齐次坐标”，
+额外的那个维度可以理解为坐标的 “缩放反比”。
+例如，一个四元组 $(x,y,z,w)$ 所表示的三维坐标为
+$(\frac{x}{w},\frac{y}{w},\frac{z}{w})$。
+一般情况下，$w=1$；而当 $w=0$ 时，该四元组表示 $(x,y,z)$ 向量。
+这种表示法可以带来诸多好处，这部分内容将在 \ref{sec-gl:projection-matrix} 节详细展开。
+
+除了顶点的位置信息之外，一个顶点可能还会包括颜色，法向量，纹理坐标等服务于渲染的其他信息。
+为了简化绘制复杂性，目前阶段对于一个顶点只考虑其位置和颜色信息。
+这两个信息分别可由一个四元组表示，位置信息为齐次坐标 $(x,y,z,w)$，
+而颜色信息为三通道颜色加上 alpha 通道 $(r,g,b,a)$。
+于是，可以用如下方式定义一个三角形的三个顶点的数据：
+
+\begin{lstlisting}[language=c++]
+float vertex_buffer[3][8] = {
+    { 0.0f,  0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+    { 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+    {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+};
+\end{lstlisting}
+
+其中每一个八元组的前四个元素表示 $(x,y,z,w)$，后四个元素表示 $(r,g,b,a)$。
+对于在二维平面上绘制的情况，坐标的第三维度暂时没有意义，故置为 $0$；
+alpha 通道默认为 $1$。
+
+定义好三角形的顶点数据后，需要将这些定点信息传入 GPU 用于绘制。
+但 CPU 与 GPU 之间的通信是一个开销非常大的操作，
+为了提高应用程序的执行效率，
+需要尽可能减少 CPU 与 GPU 之间的通信次数。
+因此，为了避免每一帧的绘制都需要将绘制过程的资源从 CPU 端传到 GPU 端，
+在现代化的图形渲染接口都会提供 GPU 端的缓冲区机制。
+缓冲区本质是显存中的一块区域，可以像内存一样存取数据。
+不同点是，显存对于 GPU 访问响应速度非常快，对于 CPU 访问响应速度非常慢，而内存反之。
+缓冲本身仅用于保存数据，而不关心数据本身的含义，
+只有将其绑定到渲染流水线的不同部分时，缓冲才会被赋予不同的意义。
+在绘制三角形时，需要先将三角形的顶点信息存入一个缓冲区，
+以供渲染流水线调用，这种缓冲区被称作顶点缓冲。
+
+在现代 OpenGL 中，缓冲区需要由程序员手动创建，
+赋值。这些操作需要用到如下函数：
+
+\begin{lstlisting}[language=c++]
+void glCreateBuffers( GLsizei n, GLuint * buffers );
+
+void glNamedBufferData(
+    GLuint buffer,
+    GLsizei size,
+    const void *data,
+    GLenum usage
+    );
+
+void glNamedBufferSubData(
+    GLuint buffer,
+    GLintptr offset,
+    GLsizei size,
+    const void *data
+    );
+\end{lstlisting}
+
+glCreateBuffers 用于创建缓冲区对象，并返回创建所对象的标识符。
+
+OpenGL 的对象管理机制并非通过接口类实现，
+而是通过标识符实现。
+所谓标识符，即一个无符号 32 位整数。
+需要对某一对象进行操作时，在调用函数时传入对应的标识符即可表明所操作的对象是哪一个。
+因此，在创建某一种对象时，需要调用对应的 glCreate***s 函数获取对应的标识符。
+这类函数的调用方法几乎一致，
+函数参数为一个整数 $n$ 和一个指向接受标识符的地址空间的指针 $buffers$。
+函数会在 $buffers$ 指向的地址空间的前 $n$ 个位置写入 $n$ 个不同的标识符，
+指向新创建的 $n$ 个对象。
+
+在只创建一个标识符时，可以这样调用：
+
+\begin{lstlisting}[language=c++]
+uint32_t vertex_buffer_object;
+glCreateBuffers( 1, &vertex_buffer_object );
+\end{lstlisting}
+
+在创建多个标识符时，以 5 个为例，可以这样调用：
+
+\begin{lstlisting}[language=c++]
+uint32_t vertex_buffer_objects[5];
+glCreateBuffers( 5, vertex_buffer_objects );
+\end{lstlisting}
+
+注意，在 OpenGL 函数定义中有许多以 GL 开头的类型，
+这是 OpenGL 为了避免在不同平台上原生类型数据长度不统一而设计的。
+为了更好地兼容与其他编程库并用时的类型统一性，
+建议使用 C/C++ 标准的定长类型替代 GL 类型。
+表 \ref{tab-gl:opengl-type} 是一个常用类型之间的简要对照表。
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{|l|l|l|}
+        \hline
+        OpenGL 类型 & 类型实质 & 标准类型\\
+        \hline
+        GLint & 32 位整型 & int32\_t\\
+        \hline
+        GLuint & 32 位无符号整型 & uint32\_t\\
+        \hline
+        GLint64 & 64 位整型 & int64\_t\\
+        \hline
+        GLuint64 & 64 位无符号整型 & uint64\_t\\
+        \hline
+        GLbyte & 8 位整型 & int8\_t\\
+        \hline
+        GLubyte & 8 位无符号整型 & uint8\_t\\
+        \hline
+        GLenum & 32 位无符号整型 & uint32\_t\\
+        \hline
+        GLsizei & 32 位整型 & int32\_t\\
+        \hline
+        GL*ptr & 64 位整型 & int64\_t\\
+        \hline
+        GLchar & 8 位整型（字符） & int8\_t (char)\\
+        \hline
+        GLboolean & 8 位无符号整型 & uint8\_t\\
+        \hline
+        GLfloat & 32 位浮点数（单精度浮点数） & float\\
+        \hline
+        GLdouble & 64 位浮点数（双精度浮点数） & double\\
+        \hline
+    \end{tabular}
+    \caption{OpenGL 类型对照表}
+    \label{tab-gl:opengl-type}
+\end{table}
+
+在创建缓冲区对象后，需要使用 glNamedBufferData 函数对新的缓冲区对象创建对应的缓冲区。
+函数参数 buffer 表示需要进行创建缓冲区操作的缓冲对象的标识符；
+size 表示所要创建的缓冲区的长度，以字节为单位；
+data 表示指向用于初始化缓冲区数据的指针，置为 nullptr 则表示不初始化缓冲区的数据；
+usage 表示该缓冲区的使用方式特征，需要传入 OpenGL 标准定义的宏。
+
+若想创建一个用于绘制三角形的顶点缓冲区，可以这样调用：
+
+\begin{lstlisting}
+glNamedBufferData(
+    vertex_buffer_object,
+    sizeof(vertex_buffer),
+    nullptr,
+    GL_STATIC_DRAW);
+\end{lstlisting}
+
+其他参数在之前的内容中出现过，不再一一解释。
+函数的最后一个参数 GL\_STATIC\_DRAW 表示该缓冲区的数据不会经常被 CPU 写入，
+会被经常用于 GPU 端的绘制操作。
+
+这个位置的参数可以看做由两部分组成，首先是表示被访问频率的第一部分，取值有：
+
+1. STATIC；表示很少被 CPU 修改，但会频繁地被 GPU 使用。
+
+2. DYNAMIC；表示经常被 CPU 修改，也会频繁地被 GPU 使用。
+
+3. STREAM；表示很少被 CPU 修改，也只会被 GPU 使用有限的几次，在图形应用中很少会用到。
+
+其次是表示 GPU 端使用方式的第二部分，取值有：
+
+1. DRAW；表示被 CPU 修改，用于 GPU 端的绘制。
+
+2. COPY；表示会被 GPU 端修改，用于 GPU 端的绘制，在图形应用中很少会用到。
+
+3. READ；表示会被 GPU 端修改，用于向 CPU 返回数据，在图形应用中很少会用到。
+
+在常见的 OpenGL 使用情形中，一般将不会每一帧都变换的资源设置为 GL\_STATIC\_DRAW，
+将每一帧都很可能发生变化的资源设置为 GL\_DYNAMIC\_DRAW。
+此外，这个参数仅表示所创建的缓冲区的使用特征的提示信息，
+硬件驱动可能会根据这个参数对数据处理流程做一些优化，
+但这个参数不会影响创建出的缓冲区的功能性，仅可能影响缓冲区在执行不同操作时的效率。
+
+在创建好缓冲区后，需要调用 glNamedBufferSubData 函数将 CPU 端的数据上传到缓冲区。
+初次上传可以在调用 glNamedBufferData 时完成，但后续的更改需要依赖这个函数。调用方法如下：
+
+\begin{lstlisting}[language=c++]
+glNamedBufferSubData(
+    vertex_buffer_object,
+    0,
+    sizeof(vertex_buffer),
+    vertex_buffer);
+\end{lstlisting}
+
+其中，0 表示缓冲区目标上传位置的偏移量，
+sizeof(vertex\_buffer) 表示上传数据的长度，
+vertex\_buffer 为 CPU 端数据的起始位置指针。
+所示函数调用语句表示把所有顶点数据全部复制到缓冲区中。
+
+如想验证数据是否成功地被复制到缓冲区中，
+可以通过 glGetNamedBufferSubData 函数将数据从缓冲区中取回。
+调用方法如下：
+
+\begin{lstlisting}
+float vertex_buffer_copy[3][8];
+glGetNamedBufferSubData(
+    vertex_buffer_object,
+    0,
+    sizeof(vertex_buffer_copy),
+    vertex_buffer_copy);
+\end{lstlisting}
+
+glGetNamedBufferSubData 函数参数含义与 glNamedBufferSubData 基本一致，
+区别在于数据流向相反。所示代码将缓冲区中数据复制到了与 CPU 端原数据无关的区域
+vertex\_buffer\_copy。
+可以通过简单的输入输出手段查看 vertex\_buffer\_copy 中的数据与 vertex\_buffer
+是否相同验证数据拷贝是否成功。
 
 \subsubsection{着色器}
 
@@ -382,7 +624,11 @@ int main(void)
 
 \subsubsection{投影矩阵}
 
+\label{sec-gl:projection-matrix}
+
 \subsubsection{uniform 变量}
+
+\subsubsection{索引缓冲}
 
 \subsubsection{深度缓冲}
 
