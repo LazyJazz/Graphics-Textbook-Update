@@ -1,0 +1,5 @@
+**/*.dll
+**/glfw3dll.lib
+**/glfw3_mt.lib
+**/libglfw3dll.a
+docs
