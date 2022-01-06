@@ -36,7 +36,7 @@ int main(void)
         return -1;
 
     /* 创建窗口 */
-    window = glfwCreateWindow(640, 480, "Hello Window", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "Hello Triangle", NULL, NULL);
     if (!window)
     {
         glfwTerminate();

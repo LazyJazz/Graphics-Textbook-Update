@@ -29,7 +29,7 @@
     commentstyle=\hwkaiti\consolas\color[RGB]{0,96,96},                % 设置代码注释的格式
     stringstyle=\consolas\color[RGB]{255,0,0},   % 设置字符串格式
     showstringspaces=false,                              % 不显示字符串中的空格
-    language=c++,                                        % 设置语言
+    %language=c++,                                        % 设置语言
 }
 \onehalfspacing
 \title{\bf\huge 计算机图形学基础教程}
@@ -437,7 +437,7 @@ alpha 通道默认为 $1$。
 为了提高应用程序的执行效率，
 需要尽可能减少 CPU 与 GPU 之间的通信次数。
 因此，为了避免每一帧的绘制都需要将绘制过程的资源从 CPU 端传到 GPU 端，
-在现代化的图形渲染接口都会提供 GPU 端的缓冲区机制。
+现代化的图形渲染接口都会提供 GPU 端的缓冲区机制。
 缓冲区本质是显存中的一块区域，可以像内存一样存取数据。
 不同点是，显存对于 GPU 访问响应速度非常快，对于 CPU 访问响应速度非常慢，而内存反之。
 缓冲本身仅用于保存数据，而不关心数据本身的含义，
@@ -606,19 +606,480 @@ glGetNamedBufferSubData(
     vertex_buffer_copy);
 \end{lstlisting}
 
-glGetNamedBufferSubData 函数参数含义与 glNamedBufferSubData 基本一致，
+glGetNamedBufferSubData 函数的参数含义与 glNamedBufferSubData 的基本一致，
 区别在于数据流向相反。所示代码将缓冲区中数据复制到了与 CPU 端原数据无关的区域
 vertex\_buffer\_copy。
 可以通过简单的输入输出手段查看 vertex\_buffer\_copy 中的数据与 vertex\_buffer
 是否相同验证数据拷贝是否成功。
 
+本小节着重介绍了三个和缓冲对象相关的 OpenGL 函数，
+但 OpenGL 的函数十分繁多，无法在书中一一讲解。
+想要了解更多 OpenGL 函数及使用方法，
+可以前往 \href{https://docs.gl/}{https://docs.gl/} 进行查询，
+这个网站收纳了所有 OpenGL 函数的信息，
+包括函数定义，功能，特性，以及支持的版本号等，十分详尽。
+后续章节中涉及到的 OpenGL 函数可能不会一一展示函数声明及定义，
+如有疑问可以前往该网站进行查询。
+（该网站有时在国内访问速度较慢，可以尝试使用网络辅助工具加快访问速度，
+在使用网络辅助工具时，请注意遵守相关法律）
+
+更多文档及学习资源请参考 \ref{sec-gl:study-resources} 节。
+
 \subsubsection{着色器}
+
+现代图形渲染接口最显著的特征是对可编程渲染管线的支持。
+在以前，绘制复杂的三维场景时只能通过给定的函数接口实现有限的几种渲染效果，
+对像素着色的方式也是固定在硬件中的。
+这种固定渲染管线的设计虽然可以简化绘制图形的流程，
+但难以实现理想的绘制效果。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{imgs/sec 3.2/programmable-rendering-pipeline.png}
+    \caption{简化的可编程渲染管线示意图}
+    \label{fig-gl:programmable-rendering-pipeline}
+\end{figure}
+
+可编程渲染管线的发明极大地拓展了图形硬件的功能，
+这种渲染管线的大致流程如图 \ref{fig-gl:programmable-rendering-pipeline} 所示。
+图中的流程并非其全貌，而是提取了其中最重要的部分进行示意。
+其中用方形框出的阶段是相对固定的，而用椭圆框出的阶段则是可编程的。
+
+现在，由上一小节的内容已经可以得到原始输入的顶点数据，
+想要将三角形绘制到屏幕上，需要将原始的顶点数据，
+主要是位置坐标，变换到和屏幕对应的二维坐标系上。
+否则，硬件设备无法得知该以怎样的方式在屏幕上绘制图形。
+这一工作需要由顶点着色器完成。
+
+所谓着色器，即是一些简单的程序块，
+类似于常见编程语言中的函数，
+只不过这些函数是运行在 GPU，而非 CPU 上的。
+这些程序块往往都非常简单，
+不会涉及复杂的流程控制，
+因而编写起来也十分容易。
+比如：顶点着色器最常见的功能就是将原始顶点信息中的三维坐标信息变换成可以直接直接用于绘制的二维坐标；
+这一过程的实现会在 \ref{sec-gl:projection-matrix} 小节进行详细说明。
+对于目前阶段所要绘制的三角形而言，
+由于原始的顶点数据中的坐标已经是二维坐标，
+所以这一阶段的顶点着色器只需要将顶点坐标信息原封不动地复制到下一阶段即可。
+
+在 OpenGL 中编写着色器需要用到一种十分类似于 C 语言的着色器语言：
+OpenGL 着色器语言（OpenGL Shading Language），简称 GLSL。
+使用 GLSL 编写一个实现上述功能的顶点着色器的代码如下：
+
+\begin{lstlisting}
+#version 450 core
+layout (location = 0) in vec4 vs_pos;
+layout (location = 1) in vec4 vs_color;
+out vec4 fs_color;
+void main()
+{
+    gl_Position = vs_pos;
+    fs_color = vs_color;
+}
+\end{lstlisting}
+
+代码中的第一行用于声明该着色器所使用的 OpenGL 特性版本，
+代码中的 450 即表示 4.5.0 版本。
+在不需要用到高版本 OpenGL 特性时，
+这个版本声明可以写得小一些，以兼容更多不支持高版本 OpenGL 的设备。
+但由于现代图形设备普遍都已支持高版本的 OpenGL，
+且 OpenGL 几乎已经停止更新了，
+此处将版本信息固定写为 450 也不会产生太多问题。
+
+接下来两行代码用于声明顶点着色器的输入：
+
+layout (location = x) 表示变量对应的数据位置编号，
+这一设置与即将在 \ref{sec-gl:fixing-pipeline} 小节介绍的管线配置有关，
+现在需要了解的是，顶点的位置信息将被分配到 0 号位置，
+顶点的颜色信息将被分配到 1 号位置即可。
+
+in 关键字用于表明接下来定义的是一个输入变量。
+
+vec4 表示变量是一个 4 维向量，
+GLSL 中默认所有向量和矩阵的基本元素是单精度浮点数，即 float 类型。
+如果希望声明整形向量，可以用 vec4i 这种在变量类型名后添加后缀 i 的方式声明。
+
+vs\_pos 和 vs\_color 为变量名，无需多解释。vs 是顶点着色器的英文名称，Vertex Shader，的缩写。
+
+代码第四行表示着色器的输出，
+由于顶点着色器的输出直接对应后续片段着色器的输入（虽然中间隔有一个光栅化阶段），
+故只需要保证变量名在两个着色器的代码中一致，即可完成对应，故无需再声明 location 字段。
+fs 是片段着色器的英文名称，Fragment Shader，的缩写。
+
+接下来是代码的主体函数，
+void main() 为所有用 GLSL 编写的着色器的入口，
+形式上与 C 语言极为相似。
+在这个着色器中，只实现了两个操作，
+即：把顶点的坐标 vs\_pos 信息赋予 OpenGL 内置的用于接收变换后的顶点位置信息的特殊变量 gl\_Position；
+以及把顶点的颜色信息原封不动的传给下一阶段的片段着色器。
+
+现在已经有了一个简单的顶点着色器。
+数据在经过顶点着色器后会进入光栅化阶段，
+光栅化的算法在本书之前的章节已经进行过详细的介绍，
+在 GPU 中，存在一种固定的光栅化单元用于高效地完成此部分工作。
+经过光栅化后，顶点信息会变为许多片段信息。
+一个片段可以简单地理解为一个像素，只不过在一些高级的技术中，可能会有多个片段对应一个像素的情况。
+片段在经过处理后最终将变为一个颜色值，用于组成最终的画面。
+只不过在刚经过光栅化阶段时，片段还会保留了许多原始数据的信息，
+需要通过片段着色器对其进行处理，生成最终的颜色信息。
+
+对于目前渲染一个三角形这个任务而言，片段着色器只需要把从顶点着色器继承的颜色信息赋值到输出端即可，
+代码如下：
+
+\begin{lstlisting}
+#version 450 core
+in vec4 fs_color;
+out vec4 color;
+void main()
+{
+    color = fs_color;
+}
+\end{lstlisting}
+
+这段代码没有涉及新的语法内容，不再展开解释。
+需要记住的是，片段着色器的输出只能是 vec4 类型的变量，
+表示一个 $(r,g,b,a)$ 四通道颜色信息。
+每一维度的范围都是单精度浮点数区间 $[0, 1]$，而非常见 24 位位图的整数区间 $[0,255]$，
+后续处理流程会自动完成颜色值区间映射过程。
+
+现在所需的着色器代码都已经备齐了，
+接下来需要在 C/C++ 代码中编写创建，编译着色器的代码。
+以下代码实现了从文件中读取着色器代码，并编译生成 OpenGL 着色器对象的功能：
+
+\begin{lstlisting}[language=c++]
+uint32_t CompileGLSLShaderFromFile(
+    const char* shader_file_path,
+    uint32_t shader_type
+)
+{
+    FILE* file = nullptr;
+#ifdef _WIN32
+    fopen_s(&file, shader_file_path, "rb");
+#else
+    file = fopen(shader_file_path, "rb");
+#endif
+    if (!file) return 0;
+    fseek(file, 0, SEEK_END);
+    int64_t length = ftell(file);
+    char* source_code = new char[length + 1];
+    memset(source_code, 0, length + 1);
+    fseek(file, 0, SEEK_SET);
+    fread(source_code, 1, length, file);
+    fclose(file);
+
+    uint32_t shader_object = glCreateShader(shader_type);
+    glShaderSource(shader_object, 1, &source_code, nullptr);
+    delete[] source_code;
+    glCompileShader(shader_object);
+
+    int32_t compilation_success;
+    glGetShaderiv(shader_object, GL_COMPILE_STATUS, &compilation_success);
+    if (!compilation_success)
+    {
+        int32_t log_length;
+        glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, &log_length);
+        char* error_info = new char[log_length + 1];
+        glGetShaderInfoLog(
+            shader_object,
+            log_length + 1,
+            &log_length,
+            error_info);
+        std::cout << error_info << std::endl;
+        glDeleteShader(shader_object);
+        delete [] error_info;
+        return 0;
+    }
+
+    return shader_object;
+}
+\end{lstlisting}
+
+这个函数的两个参数中，shader\_file\_path 表示着色器代码保存的位置，
+shader\_type 则用于标明着色器类型。
+如果是顶点着色器，应传入 GL\_VERTEX\_SHADER；
+如果是片段着色器，应传入 GL\_FRAGMENT\_SHADER。
+
+函数代码前半部分负责从指定的文件路径读取着色器代码信息。
+涉及到的 OpenGL 函数中，glCreateShader 用于创建 OpenGL 着色器对象，
+glShaderSource 用于将着色器代码绑定到着色器对象，
+glCompileShader 用于编译着色器对象。
+在编译完毕后，如果一切正常，
+则着色器创建工作完毕，返回着色器对象的标识符即可。
+如果着色器写错了，或者声明的着色器类型错误，
+则会导致编译失败。
+此时，后续的错误处理代码会将编译错误信息提取出来，输出到控制台，并返回 0。
+
+在样例代码中，上文所示的顶点着色器代码和像素着色器代码被分别保存在项目目录下的
+ vertex\_shader.glsl 和 fragment\_shader.glsl 文件中。
+调用上述函数生成着色器对象的代码如下：
+
+\begin{lstlisting}[language=c++]
+uint32_t vertex_shader_object =
+    CompileGLSLShaderFromFile("vertex_shader.glsl", GL_VERTEX_SHADER);
+uint32_t fragment_shader_object =
+    CompileGLSLShaderFromFile("fragment_shader.glsl", GL_FRAGMENT_SHADER);
+\end{lstlisting}
+
+如果编译错误，比如在着色器代码中将变量名写错，
+编译运行程序后则会出现如下错误提示（错误提示可能因 GPU 生产商的不同或驱动不同产生差异）：
+
+\begin{lstlisting}
+0(7) : error C1503: undefined variable "gl_Pos"
+\end{lstlisting}
+
+此处错误原因是，误把内置变量 gl\_Position 写成 gl\_Pos。
+
+在着色器编译完成后，
+还需要将不同阶段的着色器（Shader）链接成一个着色器程序（Program），
+才能在流水线中使用。代码如下：
+
+\begin{lstlisting}
+uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
+{
+    uint32_t program_object = glCreateProgram();
+    glAttachShader(program_object, vs_object);
+    glAttachShader(program_object, fs_object);
+    glLinkProgram(program_object);
+    int32_t link_success;
+    glGetProgramiv(program_object, GL_LINK_STATUS, &link_success);
+    if (!link_success)
+    {
+        int32_t log_length;
+        glGetProgramiv(program_object, GL_INFO_LOG_LENGTH, &log_length);
+        char * error_info = new char [log_length + 1];
+        glGetProgramInfoLog(
+            program_object,
+            log_length + 1,
+            &log_length,
+            error_info);
+        std::cout << error_info << std::endl;
+        glDeleteProgram(program_object);
+        delete[] error_info;
+        return 0;
+    }
+    return program_object;
+}
+\end{lstlisting}
+
+这个函数可以接受一个顶点着色器标识符和一个片段着色器标识符，
+链接生成一个着色器程序，并自动处理链接错误的情况。
+当一切正常时，该函数会返回一个着色器程序的标识符。
+否则，输出错误信息并返回 0。该函数的调用方法如下：
+
+\begin{lstlisting}[language=c++]
+shader_program_object =
+    LinkProgram(vertex_shader_object, fragment_shader_object);
+\end{lstlisting}
+
+当出现错误时，比如在顶点着色器中误把输出变量名 fs\_color 写成 ps\_color，会出现如下错误提示：
+
+\begin{lstlisting}
+Link info
+---------
+error: "fs_color" not declared as an output from the previous stage
+\end{lstlisting}
+
+在成功链接着色器程序后，如着色器对象不会再被使用，可以将其删除以节约资源。
+
+\begin{lstlisting}
+glDeleteShader(vertex_shader_object);
+glDeleteShader(fragment_shader_object);
+\end{lstlisting}
 
 \subsubsection{配置管线}
 
-\subsubsection{完整代码}
+\label{sec-gl:fixing-pipeline}
+
+如果以上步骤都已经完成且没有发生错误，
+至此所有绘制一个三角形所需的资源都已经备齐了。
+接下来需要做的就是将准备好的资源，
+包括顶点缓冲和着色器程序，
+绑定到渲染流水线上，
+并渲染出来。
+
+首先需要设置绘制的“视口（Viewport）”，
+即窗口中绘制图形的区域，
+以像素为单位进行指定。
+本例将把图形绘制到整个窗口中，
+故视口区域将被设置为窗口大小。
+代码如下：
+
+\begin{lstlisting}
+int32_t width, height;
+glfwGetWindowSize(window, &width, &height);
+glViewport(0, 0, width, height);
+\end{lstlisting}
+
+其中 glfwGetWindowSize 用于获取窗口大小，glViewport 用于设置视口。
+
+然后是着色器程序。着色器程序是渲染管线中最重要的部分，
+它决定了绘制图形的方式。
+调用 glUseProgram 函数将着色器程序对象设置为当前使用的着色器程序。
+
+\begin{lstlisting}
+glUseProgram(shader_program_object);
+\end{lstlisting}
+
+接下来，使用 glBindBuffer 函数将顶点缓冲区对象绑定到流水线顶点缓冲的绑定点。
+
+\begin{lstlisting}
+glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
+\end{lstlisting}
+
+OpenGL 接口标准定义了许多缓冲绑定点，
+这个函数可以将缓冲区对象绑定到不同的缓冲绑定点，
+代码中的 GL\_ARRAY\_BUFFER 是用于声明顶点缓冲绑定点的宏常量，
+除此之外，经常被使用的还有索引缓冲绑定点 GL\_ELEMENT\_ARRAY\_BUFFER。
+
+在顶点缓冲绑定完成后，需要将顶点缓冲中的数据对应到顶点着色器的输入。
+这一步可以使用 glVertexAttribPointer 函数完成此项工作。方法如下：
+
+\begin{lstlisting}
+glVertexAttribPointer(0, 4, GL_FLOAT, false, 32, (void*)0);
+glVertexAttribPointer(1, 4, GL_FLOAT, false, 32, (void*)16);
+\end{lstlisting}
+
+以上函数每一项参数对应的含义如图 \ref{fig-gl:vertex-attrib} 所示。
+
+第一个参数 index 对应了顶点着色器中的 layout (location = x) 字段，
+用于声明保定数据的位置；
+
+第二个参数 size 对应了着色器输入变量类型含有的元素个数，
+如：四维向量 vec4 含有 $4$ 个元素，
+$4\times 4$ 的矩阵 mat4 含有 $16$ 个元素。
+
+第三个参数 type 对应了元素类型，此例中为 float 类型，对应 OpenGL 标准宏常量为 GL\_FLOAT。
+此外还有 GL\_DOUBLE，GL\_INT, GL\_UNSIGNED\_INT, GL\_BYTE，GL\_UNSIGNED\_BYTE 等参数可选。
+
+第四个参数 normalized 表示是否要对数据进行归一化处理，一般置为 false。
+
+第五个参数 stride 表示从一组数据到下一组数据，起始位置相差多少个字节；
+一般使用一个顶点数据的大小。当前一个顶点使用了 8 个 float，总共为 32 字节。
+
+第六个参数 pointer 表示当前位置的数据相对一组数据的起始点的偏移量。
+比如位置数据前方没有数据，则为 0；颜色数据在位置数据之后，而位置数据占据 16 个字节，故为 16。
+此处参数虽然要求为指针类型，但实际作用方式和整数标量无异。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\linewidth]{imgs/sec 3.3/vertex-attrib.png}
+\caption{glVertexAttribPointer 函数参数对照关系示意图}
+\label{fig-gl:vertex-attrib}
+\end{figure}
+
+在绑定好每个位置的顶点数据后，还要将用到的位置激活，调用以下函数实现：
+
+\begin{lstlisting}
+glEnableVertexAttribArray(0);
+glEnableVertexAttribArray(1);
+\end{lstlisting}
+
+注意：存在一个与函数 glEnableVertexAttribArray 名称十分相似的函数 glEnableVertexArrayAttrib，
+但功能并不相同，应当避免混淆。
+
+至此，渲染一个三角形所需要进行的管线信息配置已经全部完成，
+调用函数 glDrawArrays 即可渲染出三角形。方法如下：
+
+\begin{lstlisting}
+glDrawArrays(GL_TRIANGLES, 0, 3);
+\end{lstlisting}
+
+函数第一个参数用于指定绘制模式。
+GL\_TRIANGLES 表示将顶点按照三个一组的方式组成三角形绘制。
+除此之外，还可以尝试以下模式：
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{|l|l|}
+        \hline
+        GL\_POINTS&绘制点（可能会很难看清）\\
+        \hline
+        GL\_LINE\_STRIP&绘制直线带\\
+        \hline
+        GL\_LINE\_LOOP&绘制直线环\\
+        \hline
+    \end{tabular}
+    \caption{OpenGL 绘制模式对照表}
+\end{table}
+
+函数第二个参数表示绘制起始顶点的编号，置为 0 表示从头开始。
+
+函数第三个参数表示总共参与绘制的顶点数量。
+
+如果没有发生问题，此时编译运行程序应该能够看到被绘制出的三角形。如图 \ref{fig-gl:hello-triangle} 所示。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.5\linewidth]{imgs/sec 3.3/hello-triangle.png}
+\caption{你好，三角形}
+\label{fig-gl:hello-triangle}
+\end{figure}
 
 \subsection{绘制立方体}
+
+成功绘制出一个三角形，
+就已经完成了走向高性能图形绘制最重要的一步。
+本章节要达成的目标，是从二次元走向三次元。
+更高的维数可以设计更复杂的场景，
+带来了更高的“可玩性”，
+走向三维也是连接虚拟和现实世界的必经之路。
+实现这个目标可谓意义重大。
+
+具体来说，本章节最终将实现利用 OpenGL 绘制一个具有立体感的立方体。
+之所以选择立方体，是因为立方体能够比较好地体现三维渲染的特点，
+描述一个立方体又相对简单。
+故许多图形绘制教程都会选择立方体作为三维图形绘制的例子，
+本书也不例外。
+
+\subsubsection{坐标变换}
+
+立方体可以由空间中的 12 个三角形组成，
+用上一章节中的方法将这 12 个三角形合理地绘制出来，
+目标就达成了。
+但空间中的三角形使用的是三维顶点坐标，
+绘制三角形需要的是和屏幕所在平面相关的二维坐标。
+在绘制空间中的三角形之前，
+需要先将空间中的三角形对应到屏幕上的三角形。
+
+但这种对应关系并不唯一，它受许多因素影响。
+想象一个人围着一个摆在桌子上的三角形转一圈，
+然后自身再转一圈，再走远。
+这个过程中，
+这个人看到的三角形的形状，大小，位置，甚至能否看到三角形这个状态都会随着人的移动发生变化。
+这还没有考虑到三角形自身的移动和变化等等问题。
+这些问题可以统一地归纳为坐标变换问题。
+
+要考虑坐标变换问题，需要先将问题分为两部分。
+一部分是空间坐标到空间坐标的变换。
+比如物体的移动，整体拉伸，旋转等。
+根据一些简单的线性代数和几何知识可以明白，
+物体在空间中发生的移动，整体拉伸，旋转等变化，
+都属于放射变换。
+而仿射变换又都可以通过线性操作完成，
+因此，这部分由空间坐标到空间坐标的变换是容易解决的。
+如果遇到特殊的非线性空间坐标变换，
+可以具体问题具体分析，无法一概而论。
+
+到此为止，经过一系列空间坐标到空间坐标的变换后，
+可以视所有空间坐标为以观察者所处位置及方向所形成的的坐标系中的坐标。
+所谓观察者，可以想象成一个相机，或者人的眼睛，有所处位置及上下左右前后之分，
+故可以用一个坐标系表示空间中物体相对于观察者的位置关系，
+这个坐标系被称作观察坐标系。
+
+坐标变换的第二部分，也就是从空间坐标到屏幕坐标的变换，则是实现三维图形绘制最为精妙的部分。
+想象一个拥有变化的视野范围的观察者，
+例如一个可调节倍率的望远镜（假设倍率可以从 1.0x 调节到 $\infty$x）。
+其观察到的图像也会随着视野的变化而发生变化，
+当图像大小一定时，低视野范围的观察者观察到的图形就会显得大。
+再想象出一个可以穿墙的观察者从远处开始面朝一堵面积有限的墙移动，
+直至穿过这堵墙。
+墙会先随着观察者距离的逼近逐渐变大，然后在穿墙的瞬间消失。
+再例如，距离近的静止物体在观察者移动时，在观察者的视野中移动速度快，
+而远距离的物体在观察者视野中移动速度慢。
+通过以上观察不难得出结论，从空间坐标到屏幕坐标的变换不是线性变换，
+因此描述这种变换相对困难一些。
+
 
 \subsubsection{标准化设备坐标空间}
 
@@ -631,6 +1092,8 @@ vertex\_buffer\_copy。
 \subsubsection{索引缓冲}
 
 \subsubsection{深度缓冲}
+
+\subsubsection{最终效果}
 
 \subsection{纹理贴图}
 
@@ -650,5 +1113,12 @@ vertex\_buffer\_copy。
 
 \subsection{更多学习资源}
 
+\label{sec-gl:study-resources}
+
+\href{https://docs.gl}{docs.gl，OpenGL 函数资料库：https://docs.gl/}
+
+\href{https://learnopengl.com/}{Learn OpenGL，一个出色的 OpenGL 教程：https://learnopengl.com/}
+
+\href{https://learnopengl-cn.github.io/}{Learn OpenGL 中文翻译版：https://learnopengl-cn.github.io/}
 
 \end{document}

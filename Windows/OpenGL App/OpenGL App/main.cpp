@@ -4,7 +4,7 @@
 #include <cstdint>
 
 float vertex_buffer[3][8] = {
-    { 0.0f,  0.5f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+    { 0.0f,  0.5f, -2.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
     { 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
     {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
 };
@@ -13,66 +13,140 @@ float vertex_buffer_copy[3][8];
 
 uint32_t vertex_buffer_object;
 
-/* Õâ¸öº¯ÊýÓÃÓÚ³õÊ¼»¯äÖÈ¾¹ý³ÌÖÐÓÃµ½µÄ×ÊÔ´ */
+uint32_t shader_program_object;
+
+uint32_t CompileGLSLShaderFromFile(
+    const char* shader_file_path,
+    uint32_t shader_type
+)
+{
+    FILE* file = nullptr;
+#ifdef _WIN32
+    fopen_s(&file, shader_file_path, "rb");
+#else
+    file = fopen(shader_file_path, "rb");
+#endif
+    if (!file) return 0;
+    fseek(file, 0, SEEK_END);
+    int64_t length = ftell(file);
+    char* source_code = new char[length + 1];
+    memset(source_code, 0, length + 1);
+    fseek(file, 0, SEEK_SET);
+    fread(source_code, 1, length, file);
+    fclose(file);
+
+    uint32_t shader_object = glCreateShader(shader_type);
+    glShaderSource(shader_object, 1, &source_code, nullptr);
+    delete[] source_code;
+    glCompileShader(shader_object);
+
+    int32_t compilation_success;
+    glGetShaderiv(shader_object, GL_COMPILE_STATUS, &compilation_success);
+    if (!compilation_success)
+    {
+        int32_t log_length;
+        glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, &log_length);
+        char* error_info = new char[log_length + 1];
+        glGetShaderInfoLog(shader_object, log_length + 1, &log_length, error_info);
+        std::cout << error_info << std::endl;
+        glDeleteShader(shader_object);
+        return 0;
+    }
+    return shader_object;
+}
+
+uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
+{
+    uint32_t program_object = glCreateProgram();
+    glAttachShader(program_object, vs_object);
+    glAttachShader(program_object, fs_object);
+    glLinkProgram(program_object);
+    int32_t link_success;
+    glGetProgramiv(program_object, GL_LINK_STATUS, &link_success);
+    if (!link_success)
+    {
+        int32_t log_length;
+        glGetProgramiv(program_object, GL_INFO_LOG_LENGTH, &log_length);
+        char * error_info = new char [log_length + 1];
+        glGetProgramInfoLog(program_object, log_length + 1, &log_length, error_info);
+        std::cout << error_info << std::endl;
+        glDeleteProgram(program_object);
+        delete[] error_info;
+        return 0;
+    }
+    return program_object;
+}
+
+/* è¿™ä¸ªå‡½æ•°ç”¨äºŽåˆå§‹åŒ–æ¸²æŸ“è¿‡ç¨‹ä¸­ç”¨åˆ°çš„èµ„æº */
 void InitAssets()
 {
     glCreateBuffers(1, &vertex_buffer_object);
     glNamedBufferData(vertex_buffer_object, sizeof(vertex_buffer), nullptr, GL_STATIC_DRAW);
     glNamedBufferSubData(vertex_buffer_object, 0, sizeof(vertex_buffer), vertex_buffer);
 
-    glGetNamedBufferSubData(vertex_buffer_object, 0, sizeof(vertex_buffer_copy), vertex_buffer_copy);
 
-    for (int i = 0; i < 3; i++)
-        for (int j = 0; j < 8; j++)
-            printf("%.3lf%c", vertex_buffer_copy[i][j], j == 7 ? '\n' : '\t');
+    uint32_t vertex_shader_object = CompileGLSLShaderFromFile("vertex_shader.glsl", GL_VERTEX_SHADER);
+    uint32_t fragment_shader_object = CompileGLSLShaderFromFile("fragment_shader.glsl", GL_FRAGMENT_SHADER);
+
+    shader_program_object = LinkProgram(vertex_shader_object, fragment_shader_object);
+    glDeleteShader(vertex_shader_object);
+    glDeleteShader(fragment_shader_object);
 }
 
 int main(void)
 {
     GLFWwindow* window;
 
-    /* ³õÊ¼»¯ GLFW ¿â */
+    /* åˆå§‹åŒ– GLFW åº“ */
     if (!glfwInit())
         return -1;
 
-    /* ´´½¨´°¿Ú */
-    window = glfwCreateWindow(640, 480, "Hello Window", NULL, NULL);
+    /* åˆ›å»ºçª—å£ */
+    window = glfwCreateWindow(640, 480, "Clip Space", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
         return -1;
     }
 
-    /* ½«´°¿ÚÉèÖÃÎªµ±Ç°ÉÏÏÂÎÄ */
+    /* å°†çª—å£è®¾ç½®ä¸ºå½“å‰ä¸Šä¸‹æ–‡ */
     glfwMakeContextCurrent(window);
 
-    /* ³õÊ¼»¯ GLAD ¿â£¬ÔÚÕâÒ»²½Ö®ºó²ÅÄÜµ÷ÓÃ glXXX º¯Êý */
+    /* åˆå§‹åŒ– GLAD åº“ï¼Œåœ¨è¿™ä¸€æ­¥ä¹‹åŽæ‰èƒ½è°ƒç”¨ glXXX å‡½æ•° */
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
         glfwTerminate();
         return -1;
     }
 
-    /* ÏÔÊ¾Éè±¸ÐÅÏ¢ÒÔ¼° GL °æ±¾ */
+    /* æ˜¾ç¤ºè®¾å¤‡ä¿¡æ¯ä»¥åŠ GL ç‰ˆæœ¬ */
     std::cout << "GPU:         " << glGetString(GL_RENDERER) << std::endl;
     std::cout << "GPU Vendor:  " << glGetString(GL_VENDOR) << std::endl;
     std::cout << "GL Version:  " << glGetString(GL_VERSION) << std::endl;
 
-    /* µ÷ÓÃ³õÊ¼»¯º¯Êý */
+    /* è°ƒç”¨åˆå§‹åŒ–å‡½æ•° */
 
     InitAssets();
 
-    /* ÏûÏ¢Ñ­»· */
+    /* æ¶ˆæ¯å¾ªçŽ¯ */
     while (!glfwWindowShouldClose(window))
     {
-        /* ÔÚÕâÀïÊµÏÖäÖÈ¾´úÂë */
+        /* åœ¨è¿™é‡Œå®žçŽ°æ¸²æŸ“ä»£ç  */
         glClearColor(0.6, 0.7, 0.8, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        /* ½»»»»º³å */
+        glUseProgram(shader_program_object);
+        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
+        glVertexAttribPointer(0, 4, GL_FLOAT, false, 32, (void*)0);
+        glVertexAttribPointer(1, 4, GL_FLOAT, false, 32, (void*)16);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        /* äº¤æ¢ç¼“å†² */
         glfwSwapBuffers(window);
 
-        /* ´¦Àí´°¿ÚÏûÏ¢ */
+        /* å¤„ç†çª—å£æ¶ˆæ¯ */
         glfwPollEvents();
     }
 
