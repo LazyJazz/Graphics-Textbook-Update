@@ -78,8 +78,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>E:\Project\Graphics Book Writing\Windows\OpenGL App\OpenGL App\glad\include;E:\Project\Graphics Book Writing\Windows\OpenGL App\OpenGL App\glfw-3.3.6.bin.WIN64\include;$(IncludePath)</IncludePath>
-    <LibraryPath>E:\Project\Graphics Book Writing\Windows\OpenGL App\OpenGL App\glfw-3.3.6.bin.WIN64\lib-vc2022;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)\glad\include;$(ProjectDir)\glfw-3.3.6.bin.WIN64\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)\glfw-3.3.6.bin.WIN64\lib-vc2022;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>

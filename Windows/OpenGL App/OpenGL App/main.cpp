@@ -2,14 +2,22 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <cstdint>
+#include <cmath>
 
-float vertex_buffer[3][8] = {
-    { 0.0f,  0.5f, -2.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
-    { 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
-    {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+float vertex_buffer[12][8] = {
+    { 0.0f, 0.5f, 0.0f, 1.0f, 0.75f, 0.75f, 0.75f, 1.0f},
+    { 0.5f, 0.5f, 0.0f, 1.0f, 0.75f, 0.75f, 0.75f, 1.0f},
+    { 0.5f, -0.5f, 1.0f, 1.0f, 0.75f, 0.75f, 0.75f, 1.0f},
+    { 0.5f, -0.0f, 0.0f, 1.0f, 0.5f, 0.5f, 0.5f, 1.0f},
+    { 0.5f, -0.5f, 0.0f, 1.0f, 0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, 1.0f, 1.0f, 0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.0f, -0.5f, 0.0f, 1.0f, 0.25f, 0.25f, 0.25f, 1.0f},
+    {-0.5f, -0.5f, 0.0f, 1.0f, 0.25f, 0.25f, 0.25f, 1.0f},
+    {-0.5f, 0.5f, 1.0f, 1.0f, 0.25f, 0.25f, 0.25f, 1.0f},
+    { -0.5f,  0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f},
+    {-0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f},
+    { 0.5f, 0.5f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f},
 };
-
-float vertex_buffer_copy[3][8];
 
 uint32_t vertex_buffer_object;
 
@@ -93,6 +101,17 @@ void InitAssets()
     glDeleteShader(fragment_shader_object);
 }
 
+void ProjectionMatrix(float Near, float Far, float* mat_data)
+{
+    float data[] = {
+        1.0f, 0.0f, 0.0f,                        0.0f,
+        0.0f, 1.0f, 0.0f,                        0.0f,
+        0.0f, 0.0f, Far / (Far - Near),          1.0f,
+        0.0f, 0.0f, (Far * Near) / (Near - Far), 0.0f
+    };
+    memcpy(mat_data, data, sizeof(data));
+}
+
 int main(void)
 {
     GLFWwindow* window;
@@ -102,7 +121,7 @@ int main(void)
         return -1;
 
     /* 创建窗口 */
-    window = glfwCreateWindow(640, 480, "Clip Space", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "Depth Buffer (Disabled)", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -128,6 +147,11 @@ int main(void)
 
     InitAssets();
 
+    glEnable(GL_DEPTH_TEST);
+
+    int32_t mat_proj_location
+        = glGetUniformLocation(shader_program_object, "mat_proj");
+
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
@@ -135,13 +159,22 @@ int main(void)
         glClearColor(0.6, 0.7, 0.8, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        int32_t width, height;
+        glfwGetWindowSize(window, &width, &height);
+        glViewport(0, 0, width, height);
         glUseProgram(shader_program_object);
+
+        float mat_proj_data[16];
+        ProjectionMatrix(1.0, 10.0, mat_proj_data);
+        glUniformMatrix4fv(mat_proj_location, 1, false, mat_proj_data);
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
         glVertexAttribPointer(0, 4, GL_FLOAT, false, 32, (void*)0);
         glVertexAttribPointer(1, 4, GL_FLOAT, false, 32, (void*)16);
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawArrays(GL_TRIANGLES, 0, 12);
 
         /* 交换缓冲 */
         glfwSwapBuffers(window);
