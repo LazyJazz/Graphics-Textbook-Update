@@ -1427,9 +1427,204 @@ glUniformMatrix4fv 的第三个参数用于声明矩阵是否需要转置，
 如为 true，则传入的是转置后的矩阵数据。此处应设置为 false。
 
 除此之外，还有许多 glUniform* 格式的函数，
-用于传入不同类型的变量，可以通过 docs.gl 查询具体调用方法。
+用于传入不同类型的变量，具体信息可以前往 docs.gl 查询。
 
 \subsubsection{索引缓冲}
+
+现在，坐标变换的原理和实现都已解决，
+最后需要将需要绘制的正方体定义出来。
+
+不同于上一节中只有一个三角形的情况，
+组成正方体的 $12$ 个三角形存在很多共顶点，
+如果每一个三角形都把三个顶点的数据复述一遍，
+原始的 $8$ 个顶点会变成 $36$ 个顶点，
+这样的方式造成了很高比例的资源浪费。
+
+对于这个问题，可以引入索引缓冲区解决。
+具体来说，数据的定义方式如下：
+
+\begin{lstlisting}
+float vertex_buffer[8][8] = {
+    {-1.0f,-1.0f,-1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f},
+    {-1.0f,-1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+    {-1.0f, 1.0f,-1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+    {-1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+    { 1.0f,-1.0f,-1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+    { 1.0f,-1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+    { 1.0f, 1.0f,-1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
+};
+
+uint32_t index_buffer[36] = {
+    0,2,1,
+    1,2,3,
+    4,5,6,
+    5,7,6,
+    0,6,2,
+    0,4,6,
+    1,3,5,
+    3,7,5,
+    2,6,3,
+    3,6,7,
+    0,1,4,
+    1,5,4
+};
+\end{lstlisting}
+
+顶点缓冲包含了一个立方体八个顶点的数据，
+索引缓冲则以三个为一组，
+定义了每个三角形三个顶点对应的顶点编号。
+然后，将索引缓冲同样复制到一个缓冲对象中：
+\begin{lstlisting}
+glCreateBuffers(1, &index_buffer_object);
+glNamedBufferData(
+    index_buffer_object, 
+    sizeof(index_buffer), 
+    nullptr, 
+    GL_STATIC_DRAW
+);
+glNamedBufferSubData(
+    index_buffer_object,
+    0,
+    sizeof(index_buffer),
+    index_buffer
+);
+\end{lstlisting}
+
+最后，将索引缓冲对象绑定到流水线，
+并将绘制函数由原来的 glDrawArrays 改为索引模式的 glDrawElements：
+
+\begin{lstlisting}
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
+glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, nullptr);
+\end{lstlisting}
+
+glDrawElements 的第三个参数用于说明索引数据的类型，
+应当与定义时的类型相符。
+
+最后一个参数是用于指定第一个索引在索引缓冲中的位置的，
+以字节为单位。
+
+此时，定义的立方体是完全包裹住坐标原点的，
+为了看清它需要将其放远一点，比如将所有顶点的 $z$ 轴坐标加 $5$：
+
+\begin{lstlisting} 
+for (int i = 0; i < 8; i++)
+    vertex_buffer[i][2] += 5.0;
+\end{lstlisting}
+
+这样，编译运行后就能看到立方体的正面了，效果如图。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.5\linewidth]{imgs/sec 4.6/hello-cube.png}
+\caption{由于立方体是正对着观察者的，因此只能看到一个面。}
+\end{figure}
+
+\subsubsection{最终效果}
+
+对于一个三维立方体，只能看到一个面当然是难以让人满意的，
+所以需要想办法让它转起来。
+为了描述方便，样例中引入了一个简单的自定义矩阵类型，
+支持矩阵乘法操作。
+这部分代码可以自行实现，
+或使用第三方数学库，
+故不再在此示出。
+
+为了让物体旋转，
+需要额外用一个 uniform 变量接收变换顶点坐标的矩阵，
+并在顶点坐标左乘投影矩阵之前先左乘先左乘这个矩阵。
+
+空间坐标变换的矩阵可以同时处理旋转和平移操作，
+故不再需要上一小节中手动给所有顶点的 $z$ 坐标加 $5$ 的代码。
+
+定义平移矩阵和旋转矩阵的代码如下：
+\begin{lstlisting}
+/* 平移矩阵 */
+Matrix TranslateMatrix(float x, float y, float z)
+{
+    return Matrix(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+            x,   y,   z, 1.0
+        );
+}
+/* 旋转矩阵
+   pitch：俯仰角
+   yaw：偏航角
+   roll：滚转角
+ */
+Matrix RotationMatrix(float pitch, float yaw, float roll)
+{
+    return
+        Matrix(
+                cos(yaw), 0.0, sin(yaw), 0.0,
+            0.0,       1.0, 0.0,      0.0,
+            -sin(yaw), 0.0, cos(yaw), 0.0,
+            0.0,       0.0, 0.0,      1.0
+            ) *
+        Matrix(
+            1.0, 0.0,        0.0,        0.0,
+            0.0, cos(pitch), sin(pitch), 0.0,
+            0.0,-sin(pitch), cos(pitch), 0.0,
+            0.0, 0.0,        0.0,        1.0
+            ) *
+        Matrix(
+            cos(roll),-sin(roll), 0.0, 0.0,
+            sin(roll), cos(roll), 0.0, 0.0,
+            0.0,       0.0,       1.0, 0.0,
+            0.0,       0.0,       0.0, 1.0
+            );
+}
+\end{lstlisting}
+
+通过以上函数，将三个方向的旋转角每一帧都增加一定量，
+即可实现旋转效果。
+
+\begin{lstlisting}
+pitch += 0.001; yaw += 0.002; roll += 0.003;
+Matrix mat_trans
+    = TranslateMatrix(0.0, 0.0, 5.0) * RotationMatrix(pitch, yaw, roll);
+glUniformMatrix4fv(mat_trans_location, 1, false, (float*)&mat_trans);
+\end{lstlisting}
+
+此外，由上一小节的绘制结果可以看出，绘制出的立方体被拉长了。
+这是因为窗口的长宽并不相等，但都映射到了 NDC 空间的 $[-1, 1]$ 范围。
+为解决这个问题，需要在投影矩阵中引入长宽比修正项（已经改为矩阵类型返回的形式）：
+
+\begin{lstlisting}
+/* aspect 即为长宽比修正项 */
+Matrix ProjectionMatrix(float Near, float Far, float aspect)
+{
+    return Matrix(
+        1.0f / aspect, 0.0f, 0.0f,                        0.0f,
+        0.0f,          1.0f, 0.0f,                        0.0f,
+        0.0f,          0.0f, Far / (Far - Near),          1.0f,
+        0.0f,          0.0f, (Far * Near) / (Near - Far), 0.0f
+    );
+}
+\end{lstlisting}
+
+调用时需要传入长宽比参数：
+\begin{lstlisting}
+Matrix mat_proj = 
+    ProjectionMatrix(1.0, 10.0, (float)width / (float)height);
+glUniformMatrix4fv(mat_proj_location, 1, false, (float*)&mat_proj);
+\end{lstlisting}
+
+以上修改完成后，编译运行程序即可看到一个旋转的立方体，
+并且没有拉伸变形的问题了。运行效果如图 \ref{fig-gl:rotating-cube} 所示。
+
+\begin{figure}
+\centering
+\includegraphics[width=0.5\linewidth]{imgs/sec 4.7/rotating-cube.png}
+\caption{运行结果中的一帧}
+\label{fig-gl:rotating-cube}
+\end{figure}
+
+至此，从二维走向三维的跨越成功实现。
+
 
 \subsection{纹理贴图}
 
