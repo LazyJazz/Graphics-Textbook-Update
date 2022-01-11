@@ -1628,9 +1628,319 @@ glUniformMatrix4fv(mat_proj_location, 1, false, (float*)&mat_proj);
 
 \subsection{纹理贴图}
 
+绘制三维世界，仅仅依靠几何模型是不够的，
+因为许多现实世界中的很多细节，依靠建模表达会非常浪费资源，
+同时效果也不明显。
+比如在绘制一面砖墙的时候，
+如果用建模的方式绘制一面砖墙，
+则每一块墙砖、每一条缝隙都需要用更多的三角形来表示。
+为了使绘制的效果更真实，建模所需要的三角形数量规模是巨大的。
+这对资源有限的实时渲染场景是极大的压力。
+
+于是纹理贴图技术应运而生，
+纹理贴图的本质就是使用一张图片代替许多模型细节，
+同样是绘制一面砖墙的案例，
+设计师只需要一张砖墙的图片，
+并将其绘制到一个矩形上，
+就实现了砖墙的效果，简单方便。
+而在需要增加细节时，往往只需要提升纹理贴图的分辨率即可。
+
+纹理贴图的应用不只是在几何图形上绘制更多颜色，
+它还可以用于提供其它方面的信息，
+比如：法向贴图可以用于表示同一平面上法向量的偏移量，
+结合光照模型绘制出凹凸感。
+这些高级的用法可以自行查找相关资料进行学习，
+本节内容仅介绍最简单的纹理贴图使用方法。
+
 \subsubsection{加载纹理}
 
+使用纹理贴图的第一步是将纹理数据加载到 OpenGL 设备中。
+将图片从文件加载到内存并进行编码解码的过程并不统一，
+这个过程有许多第三方库可以使用，并不是问题的关键，
+故在此不进行说明。
+为了快速获得一段纹理数据，可以直接在内存中构造一个纹理贴图：
+\begin{lstlisting}[language=c++]
+uint8_t pixel_data[256][256][3];
+for (int i = 0; i < 256; i++)
+    for (int j = 0; j < 256; j++)
+    {
+        pixel_data[i][j][0] = i ^ j;
+        pixel_data[i][j][1] = i ^ j;
+        pixel_data[i][j][2] = i ^ j;
+    }
+\end{lstlisting}
+
+构造出的纹理如图\ref{fig-gl:texture}：
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.35\linewidth]{imgs/sec 5.1/texture.png}
+\caption{构造出的纹理}
+\label{fig-gl:texture}
+\end{figure}
+
+接下来，需要在 OpenGL 中创建一个纹理对象，
+并将数据上传到创建的纹理对象中。
+这个过程与创建缓冲对象并上传数据的过程类似，
+代码如下：
+
+\begin{lstlisting}
+glCreateTextures(GL_TEXTURE_2D, 1, &texture_object);
+glBindTexture(GL_TEXTURE_2D, texture_object);
+glTexImage2D(
+    GL_TEXTURE_2D,
+    0,
+    GL_RGB32F,
+    256, 256,
+    0,
+    GL_RGB, GL_UNSIGNED_BYTE, pixel_data);
+glBindTexture(GL_TEXTURE_2D, 0);
+\end{lstlisting}
+
+这段代码中，GL\_TEXTURE\_2D 表示创建的纹理对象是一个二维纹理，
+也是最通用的一种纹理。
+OpenGL 中操作纹理对象之前必须先将纹理绑定到绑定点上，
+再根据绑定点进行操作。
+因此需要在使用 glTexImage2D 函数进行数据上传的前后，
+通过 glBindTexture 函数进行绑定和解绑，
+绑定点同样也用 GL\_TEXTURE\_2D 指定。
+
+以上代码中，glTexImage2D 函数相对比较复杂。其定义如下：
+
+\begin{lstlisting}
+void glTexImage2D(
+    GLenum target,
+    GLint level,
+    GLint internalFormat,
+    GLsizei width,
+    GLsizei height,
+    GLint border,
+    GLenum format,
+    GLenum type,
+    const GLvoid * data);
+\end{lstlisting}
+
+target：
+
+用于指定纹理对象的绑定点。此处为 GL\_TEXTURE\_2D。
+
+level：
+
+表示纹理的细节层数，在一些高级的技术中会用到。此处置为 0。
+
+internalFormat：
+
+表示纹理对象的内部存储格式。
+这里要特别注意，
+前文中定义的纹理数据是用三个字节表示一个像素的 RGB 三通道信息的。
+但上传数据的格式不必和内部存储格式一致，
+OpenGL 会自动进行格式转换操作。
+此处样例中设为 GL\_RGB32F，表示内部各式具有 RGB 三通道，
+每个通道都用一个 32 位浮点数表示。
+一些其它 OpenGL 支持的常用内部格式见表 \ref{tab-gl:internal-format-list}。
+
+一般的图片都是用 8 位无符号归一化整数，
+将 $[0, 255]$ 映射到 $[0, 1]$ 表示一个通道的颜色数据。
+而浮点数表示的纹理通常用于记录一些其它的数据，
+其单通道表示范围也不限于 $[0, 1]$，可以支持完整的浮点数域。
+
+\begin{table}
+\begin{tabular}{|l|l|l|l|l|l|l|}
+    \hline
+    内部格式&R通道&G通道&B通道&A通道&说明\\
+    \hline
+    GL\_R8&8位&&&&无符号归一化整数\\
+    \hline
+    GL\_RG8&8位&8位&&&无符号归一化整数\\
+    \hline
+    GL\_RGB8&8位&8位&8位&&无符号归一化整数（24位色）\\
+    \hline
+    GL\_RGBA8&8位&8位&8位&8位&无符号归一化整数\\
+    \hline
+    GL\_R32F&32位&&&&单精度浮点数\\
+    \hline
+    GL\_RG32F&32位&32位&&&单精度浮点数\\
+    \hline
+    GL\_RGB32F&32位&32位&32位&&单精度浮点数\\
+    \hline
+    GL\_RGBA32F&32位&32位&32位&32位&单精度浮点数\\
+    \hline
+\end{tabular}
+\caption{OpenGL 纹理内部格式对应表（部分）}
+\label{tab-gl:internal-format-list}
+\end{table}
+
+width，height：
+
+分别表示纹理的长和宽，以像素为单位。
+
+border：
+
+必须设为 0，目前没有意义。
+
+format：
+
+表示上传数据的像素格式，可以是 GL\_R，GL\_RG，GL\_RGB，GL\_RGBA 等，
+更多格式可以参考 docs.gl 的说明。
+
+type：
+
+表示上传数据的像素单通道类型，
+可以取 GL\_UNSIGNED\_BYTE，
+GL\_FLOAT 等。与 format 共同组成对上传数据格式的描述。
+如：format = GL\_RGB，type = GL\_UNSIGNED\_BYTE 表示
+每个像素具有 RGB 三通道，每个通道为 8 位无符号整数，即 24 位色。
+
+data：
+
+指向上传数据的指针，可读区域应至少为 width$\times$height$\times$pixel\_size。
+此处使用之前构造的 pixel\_data 即可。
+
 \subsubsection{绘制纹理}
+
+在成功创建纹理后，将纹理绘制出来需要片段着色器的帮助。
+前文提到，顶点数据可以保存许多信息，
+除位置坐标和颜色外，还可以包括纹理坐标信息。
+纹理坐标信息是一个二维坐标，
+表示纹理贴图上的一点，
+每一维度的范围为 $[0, 1]$，
+分别对应纹理贴图长宽的范围。
+
+想要将一个纹理绘制出来，可以用以下数据表示的两个三角形组成的矩形完成：
+
+\begin{lstlisting}
+float vertex_buffer[4][6] = {
+    {-0.5, -0.5, 0.0, 1.0, 0.0, 0.0},
+    {-0.5,  0.5, 0.0, 1.0, 0.0, 1.0},
+    { 0.5, -0.5, 0.0, 1.0, 1.0, 0.0},
+    { 0.5,  0.5, 0.0, 1.0, 1.0, 1.0}
+};
+
+uint32_t index_buffer[6] = {
+    0,2,1,
+    1,2,3,
+};
+\end{lstlisting}
+
+其中顶点信息的前四个维度表示齐次坐标四元组 $(x, y, z, w)$，
+后两维度表示纹理坐标 $(tx, ty)$。
+
+对应需要修改的还包括 glVertexAttribPointer 函数定义的布局信息，
+以及两个着色器，分别修改如下：
+
+顶点布局
+
+\begin{lstlisting}
+glVertexAttribPointer(0, 4, GL_FLOAT, false, 24, (void*)0);
+glVertexAttribPointer(1, 2, GL_FLOAT, false, 24, (void*)16);
+\end{lstlisting}
+
+顶点着色器
+
+\begin{lstlisting}
+#version 450 core
+layout (location = 0) in vec4 vs_pos;
+layout (location = 1) in vec2 vs_texcoord;
+out vec2 fs_texcoord;
+void main()
+{
+    gl_Position = vs_pos;
+    fs_texcoord = vs_texcoord;
+}
+\end{lstlisting}
+
+片段着色器
+
+\begin{lstlisting}
+#version 450 core
+in vec2 fs_texcoord;
+out vec4 color;
+uniform sampler2D texture0;
+void main()
+{
+    color = texture(texture0, fs_texcoord);
+}
+\end{lstlisting}
+
+片段着色器中使用了一个新的 uniform 类型 sampler2D（二维采样器），
+这个类型的变量用于标记绑定的纹理编号，默认为 0。
+其本身不必须被传入参数，
+在使用多个纹理时，
+可以对该类型变量传入整数值以标记每个 sampler2D 对象对应的纹理编号。
+在定义了 sampler2D 类型的变量后，
+可以用代码中的方式，
+根据纹理坐标，调用 texture 函数进行纹理信息的采样。
+采样返回值为 vec4 类型，直接赋予输出的颜色变量即可。
+
+最后，需要在 C/C++ 代码中定义纹理采样的方式，
+这一操作同样需要绑定后进行：
+
+\begin{lstlisting}
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+\end{lstlisting}
+
+glTexParameteri 函数用于设置纹理的参数。
+这个函数的第二个参数用于指定要进行设置的纹理参数，
+
+GL\_TEXTURE\_MAG\_FILTER 和 GL\_TEXTURE\_MIN\_FILTER
+分别表示在纹理被放大或缩小时，
+采样器对纹理进行过滤的方法。
+GL\_NEAREST 表示取最近点，
+采样器会返回距离纹理坐标最近的像素的值，
+这样的设置在纹理被放大显示时，
+看上去会有很多方格，即被放大的像素；
+还可以选择 GL\_LINEAR，表示线性过滤，
+采样器会根据不能纹理坐标周围的四个像素的值进行插值计算，
+得到采样结果，这样的设置在纹理被放大显示时，
+看上去会比较模糊，像素之间的界限不清晰。
+
+GL\_TEXTURE\_WRAP\_S 和 GL\_TEXTURE\_WRAP\_T
+用于指定纹理在横纵坐标上的环绕方式，
+即当纹理坐标超出 $[0, 1]$ 时，
+应该取什么颜色。
+几种取值的效果见图 \ref{fig-gl:wrap-mode}。
+
+
+\begin{figure}
+    \centering
+    \subfigure[GL\_REPEAT]{
+        \begin{minipage}[t]{0.23\linewidth}
+        \centering
+        \includegraphics[height=1.2in]{imgs/sec 5.2/texture-repeat.png}
+        \end{minipage}
+    }
+    \subfigure[GL\_MIRRORED\_REPEAT]{
+        \begin{minipage}[t]{0.23\linewidth}
+        \centering
+        \includegraphics[height=1.2in]{imgs/sec 5.2/texture-mirror.png}
+        \end{minipage}
+    }
+    \subfigure[GL\_CLAMP\_TO\_EDGE]{
+        \begin{minipage}[t]{0.23\linewidth}
+        \centering
+        \includegraphics[height=1.2in]{imgs/sec 5.2/texture-clamp-edge.png}
+        \end{minipage}
+    }
+    \subfigure[GL\_CLAMP\_TO\_BORDER]{
+        \begin{minipage}[t]{0.23\linewidth}
+        \centering
+        \includegraphics[height=1.2in]{imgs/sec 5.2/texture-clamp-to-border.png}
+        \end{minipage}
+    }
+    \caption{四种环绕方式的效果}
+    \label{fig-gl:wrap-mode}
+\end{figure}
+
+一切设置完毕，编译运行程序后，运行结果如图 \ref{fig-gl:texture-rendered}。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.5\linewidth]{imgs/sec 5.2/texture.png}
+\caption{纹理绘制效果图}
+\label{fig-gl:texture-rendered}
+\end{figure}
 
 \subsection{光照}
 
