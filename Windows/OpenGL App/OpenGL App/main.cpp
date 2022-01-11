@@ -4,17 +4,58 @@
 #include <cstdint>
 #include <cmath>
 
-float vertex_buffer[4][6] = {
-    {-1.0, -1.0, 0.0, 1.0,-1.0,-1.0},
-    {-1.0,  1.0, 0.0, 1.0,-1.0, 2.0},
-    { 1.0, -1.0, 0.0, 1.0, 2.0,-1.0},
-    { 1.0,  1.0, 0.0, 1.0, 2.0, 2.0}
+const double pi = 3.14159265358979323846264338327950288419716939937510;
+
+struct Matrix
+{
+    float m[4][4];
+    Matrix(float scale = 0.0) : Matrix(
+        scale, 0.0f, 0.0f, 0.0f,
+        0.0f, scale, 0.0f, 0.0f,
+        0.0f, 0.0f, scale, 0.0f,
+        0.0f, 0.0f, 0.0f, scale
+    )
+    {}
+    Matrix(
+        float m00, float m01, float m02, float m03,
+        float m10, float m11, float m12, float m13,
+        float m20, float m21, float m22, float m23,
+        float m30, float m31, float m32, float m33
+    )
+    {
+        m[0][0] = m00; m[0][1] = m01; m[0][2] = m02; m[0][3] = m03;
+        m[1][0] = m10; m[1][1] = m11; m[1][2] = m12; m[1][3] = m13;
+        m[2][0] = m20; m[2][1] = m21; m[2][2] = m22; m[2][3] = m23;
+        m[3][0] = m30; m[3][1] = m31; m[3][2] = m32; m[3][3] = m33;
+    }
+    Matrix operator * (const Matrix& mat) const
+    {
+        Matrix res;
+        for (int j = 0; j < 4; j++)
+            for (int i = 0; i < 4; i++)
+                for (int k = 0; k < 4; k++)
+                    res.m[j][i] += m[k][i] * mat.m[j][k];
+        return res;
+    }
 };
 
-uint32_t index_buffer[6] = {
-    0,2,1,
-    1,2,3,
+struct Vec3f
+{
+    float x, y, z;
+    Vec3f() { x = y = z = 0.0f; }
+    Vec3f(float _x, float _y, float _z) { x = _x; y = _y; z = _z; }
 };
+
+struct TriInd
+{
+    uint32_t i0, i1, i2;
+    TriInd() { i0 = i1 = i2 = 0; }
+    TriInd(uint32_t _i0, uint32_t _i1, uint32_t _i2) { i0 = _i0; i1 = _i1; i2 = _i2; }
+};
+
+Vec3f vertex_buffer[60 * 59 + 2];
+
+TriInd index_buffer[59 * 60 * 2];
 
 uint32_t vertex_buffer_object;
 uint32_t index_buffer_object;
@@ -88,6 +129,36 @@ uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
 /* 这个函数用于初始化渲染过程中用到的资源 */
 void InitAssets()
 {
+    vertex_buffer[0] = Vec3f(0.0f, 0.0f, 1.0f);
+    vertex_buffer[1] = Vec3f(0.0f, 0.0f, -1.0f);
+    for (int i = 1; i <= 59; i++)
+    {
+        float y = i * (1.0f / 60.0f) * pi;
+        float siny = sin(y), cosy = cos(y);
+        for (int j = 0; j < 60; j++)
+        {
+            float x = j * (1.0f / 30.0f) * pi;
+            float sinx = sin(x), cosx = cos(x);
+            vertex_buffer[(i - 1) * 60 + j + 2] = Vec3f(siny * sinx, siny * cosx, cosy);
+        }
+    }
+    for (int i = 0; i < 58; i++)
+    {
+        int next_i = i + 1;
+        for (int j = 0; j < 60; j++)
+        {
+            int next_j = (j + 1) % 60;
+            index_buffer[i * 120 + j * 2] = TriInd(i * 60 + j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+            index_buffer[i * 120 + j * 2 + 1] = TriInd(next_i * 60 + next_j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+        }
+    }
+    for (int j = 0; j < 60; j++)
+    {
+        int next_j = (j + 1) % 60;
+        index_buffer[58 * 60 * 2 + j * 2] = TriInd(58 * 60 + j + 2, 58 * 60 + next_j + 2, 1);
+        index_buffer[58 * 60 * 2 + j * 2 + 1] = TriInd(j + 2, next_j + 2, 0);
+    }
+
     glCreateBuffers(1, &vertex_buffer_object);
     glNamedBufferData(vertex_buffer_object, sizeof(vertex_buffer), nullptr, GL_STATIC_DRAW);
     glNamedBufferSubData(vertex_buffer_object, 0, sizeof(vertex_buffer), vertex_buffer);
@@ -104,19 +175,54 @@ void InitAssets()
     glDeleteShader(vertex_shader_object);
     glDeleteShader(fragment_shader_object);
 
-    uint8_t pixel_data[256][256][3];
-    for (int i = 0; i < 256; i++)
-        for (int j = 0; j < 256; j++)
-        {
-            pixel_data[i][j][0] = i ^ j;
-            pixel_data[i][j][1] = i ^ j;
-            pixel_data[i][j][2] = i ^ j;
-        }
+    //glCreateTextures(GL_TEXTURE_2D, 1, &texture_object);
+    //glBindTexture(GL_TEXTURE_2D, texture_object);
+    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    //glBindTexture(GL_TEXTURE_2D, 0);
+}
 
-    glCreateTextures(GL_TEXTURE_2D, 1, &texture_object);
-    glBindTexture(GL_TEXTURE_2D, texture_object);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, pixel_data);
-    glBindTexture(GL_TEXTURE_2D, 0);
+Matrix ProjectionMatrix(float Near, float Far, float aspect)
+{
+    return Matrix(
+        1.0f / aspect, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, Far / (Far - Near), 1.0f,
+        0.0f, 0.0f, (Far * Near) / (Near - Far), 0.0f
+    );
+}
+
+Matrix TranslateMatrix(float x, float y, float z)
+{
+    return Matrix(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        x, y, z, 1.0
+    );
+}
+
+
+Matrix RotationMatrix(float pitch, float yaw, float roll)
+{
+    return
+        Matrix(
+            cos(yaw), 0.0, sin(yaw), 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            -sin(yaw), 0.0, cos(yaw), 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ) *
+        Matrix(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, cos(pitch), sin(pitch), 0.0,
+            0.0, -sin(pitch), cos(pitch), 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ) *
+        Matrix(
+            cos(roll), -sin(roll), 0.0, 0.0,
+            sin(roll), cos(roll), 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+        );
 }
 
 int main(void)
@@ -154,30 +260,43 @@ int main(void)
 
     InitAssets();
 
+    int32_t mat_proj_location, mat_trans_location;
+    mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
+    mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
+
+    glEnable(GL_DEPTH_TEST);
+
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
         /* 在这里实现渲染代码 */
         glClearColor(0.6, 0.7, 0.8, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_DEPTH_BUFFER_BIT);
 
         int32_t width, height;
         glfwGetWindowSize(window, &width, &height);
         glViewport(0, 0, width, height);
         glUseProgram(shader_program_object);
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
-        glVertexAttribPointer(0, 4, GL_FLOAT, false, 24, (void*)0);
-        glVertexAttribPointer(1, 2, GL_FLOAT, false, 24, (void*)16);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 12, (void*)0);
         glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
+        //glEnableVertexAttribArray(1);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        glBindTexture(GL_TEXTURE_2D, texture_object);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+        //glBindTexture(GL_TEXTURE_2D, texture_object);
+        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        Matrix mat_proj, mat_trans;
+        mat_proj = ProjectionMatrix(1.0f, 10.0f, (float)width / (float)height);
+        mat_trans = TranslateMatrix(0.0f, 0.0f, 5.0f);
+        glUniformMatrix4fv(mat_proj_location, 1, 0, (float*)&mat_proj);
+        glUniformMatrix4fv(mat_trans_location, 1, 0, (float*)&mat_trans);
+
+        glDrawElements(GL_TRIANGLES, 59*120*3, GL_UNSIGNED_INT, nullptr);
 
         /* 交换缓冲 */
         glfwSwapBuffers(window);
