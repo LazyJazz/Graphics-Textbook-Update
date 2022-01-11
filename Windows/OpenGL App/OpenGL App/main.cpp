@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstdint>
 #include <cmath>
+#include <thread>
 
 const double pi = 3.14159265358979323846264338327950288419716939937510;
 
@@ -44,6 +45,22 @@ struct Vec3f
     float x, y, z;
     Vec3f() { x = y = z = 0.0f; }
     Vec3f(float _x, float _y, float _z) { x = _x; y = _y; z = _z; }
+    friend Vec3f operator * (const Matrix& mat, const Vec3f& vec)
+    {
+        return Vec3f(
+            vec.x * mat.m[0][0] + vec.y * mat.m[1][0] + vec.z * mat.m[2][0],
+            vec.x * mat.m[0][1] + vec.y * mat.m[1][1] + vec.z * mat.m[2][1],
+            vec.x * mat.m[0][2] + vec.y * mat.m[1][2] + vec.z * mat.m[2][2]
+        );
+    }
+    friend Vec3f operator * (const Vec3f& vec, const Matrix& mat)
+    {
+        return Vec3f(
+            vec.x * mat.m[0][0] + vec.y * mat.m[0][1] + vec.z * mat.m[0][2],
+            vec.x * mat.m[1][0] + vec.y * mat.m[1][1] + vec.z * mat.m[1][2],
+            vec.x * mat.m[2][0] + vec.y * mat.m[2][1] + vec.z * mat.m[2][2]
+        );
+    }
 };
 
 struct TriInd
@@ -260,17 +277,50 @@ int main(void)
 
     InitAssets();
 
-    int32_t mat_proj_location, mat_trans_location;
+    int32_t mat_proj_location, mat_trans_location, lights_pos_location, lights_color_location;
     mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
     mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
+    lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
+    lights_color_location = glGetUniformLocation(shader_program_object, "lights_color");
 
     glEnable(GL_DEPTH_TEST);
+
+    Vec3f lights_pos[8] = {
+        {-10.0f, -10.0f,  10.0f},
+        {-10.0f,  10.0f, -10.0f},
+        {-10.0f,  10.0f,  10.0f},
+        { 10.0f, -10.0f, -10.0f},
+        { 10.0f, -10.0f,  10.0f},
+        { 10.0f,  10.0f, -10.0f},
+        { 10.0f,  10.0f,  10.0f},
+        { 100.0f, 100.0f, -100.0f}
+    };
+    Vec3f lights_color[8] = {
+        { 0.0f,  0.0f, 1000.0f},
+        { 0.0f, 1000.0f,  0.0f},
+        { 0.0f, 1000.0f, 1000.0f},
+        {1000.0f,  0.0f,  0.0f},
+        {1000.0f,  0.0f, 1000.0f},
+        {1000.0f, 1000.0f,  0.0f},
+        {1000.0f, 1000.0f, 1000.0f},
+        {1000000.0f, 1000000.0f, 1000000.0f}
+    };
+    Matrix lights_rotation[8] = {
+        RotationMatrix(0.00f, 0.01f, 0.01f),
+        RotationMatrix(0.01f, 0.00f, 0.01f),
+        RotationMatrix(0.00f, 0.00f, 0.01f),
+        RotationMatrix(0.01f, 0.01f, 0.00f),
+        RotationMatrix(0.00f, 0.01f, 0.00f),
+        RotationMatrix(0.01f, 0.00f, 0.00f),
+        RotationMatrix(0.00f, 0.00f, 0.00f),
+        RotationMatrix(0.001f, 0.002f, 0.003f)
+    };
 
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
         /* 在这里实现渲染代码 */
-        glClearColor(0.6, 0.7, 0.8, 1.0);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
         glClear(GL_DEPTH_BUFFER_BIT);
 
@@ -296,6 +346,10 @@ int main(void)
         glUniformMatrix4fv(mat_proj_location, 1, 0, (float*)&mat_proj);
         glUniformMatrix4fv(mat_trans_location, 1, 0, (float*)&mat_trans);
 
+        for (int i = 0; i < 8; i++) lights_pos[i] = lights_rotation[i] * lights_pos[i];
+        glUniform3fv(lights_pos_location, 8, (float*)lights_pos);
+        glUniform3fv(lights_color_location, 8, (float*)lights_color);
+
         glDrawElements(GL_TRIANGLES, 59*120*3, GL_UNSIGNED_INT, nullptr);
 
         /* 交换缓冲 */
@@ -303,6 +357,7 @@ int main(void)
 
         /* 处理窗口消息 */
         glfwPollEvents();
+        //std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
     glfwTerminate();
