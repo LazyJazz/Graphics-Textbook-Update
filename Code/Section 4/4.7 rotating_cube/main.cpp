@@ -2,7 +2,9 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
+#include <thread>
 
 struct Matrix
 {
@@ -238,7 +240,7 @@ int main(void)
 
     float pitch = 0.0, yaw = 0.0, roll = 0.0;
 
-    glfwSwapInterval(0);
+    glfwSwapInterval(1);
 
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
@@ -278,6 +280,8 @@ int main(void)
 
         /* 处理窗口消息 */
         glfwPollEvents();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     glfwTerminate();
