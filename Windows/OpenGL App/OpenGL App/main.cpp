@@ -486,10 +486,10 @@ int main(void)
         /* 处理窗口消息 */
         glfwPollEvents();
 
-        for (int i = 0; i < 10; i++)
-            UpdateBalls(0.002);
+        for (int i = 0; i < 20; i++)
+            UpdateBalls(0.001);
+        
     }
-
     glfwTerminate();
     return 0;
 }
