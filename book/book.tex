@@ -1960,7 +1960,33 @@ GL\_TEXTURE\_WRAP\_S 和 GL\_TEXTURE\_WRAP\_T
 而在可编程渲染管线中，
 开发者可以通过编写不同的着色器实现复杂的光照计算。
 
-\subsubsection{实现基于 BRDF 的光照}
+光照的引入可以使绘制出的画面质量得到质的飞越，
+本节的内容将从理论角度分析实现光照算法的过程以及可能遇到的问题，
+最终实现从图 \ref{fig-gl:no-lighting} 到图 \ref{fig-gl:with-lighting} 的变化。
+
+\begin{figure}[htbp]
+    \centering
+    \subfigure[无光照]
+    {
+        \begin{minipage}[t]{0.4\linewidth}
+        \centering
+        \includegraphics[height=2in]{imgs/sec 7.1/no-lighting.png}
+        \label{fig-gl:no-lighting}
+        \end{minipage}
+    }
+    \subfigure[光照及阴影]
+    {
+        \begin{minipage}[t]{0.4\linewidth}
+        \centering
+        \includegraphics[height=2in]{imgs/sec 7.1/lighting-with-shadow.png}
+        \label{fig-gl:with-lighting}
+        \end{minipage}
+    }
+    \caption{有无光照效果对比}
+    \label{fig-gl:lighting-compare}
+\end{figure}
+
+\subsubsection{实现光照}
 
 \subsubsection{绘制阴影}
 

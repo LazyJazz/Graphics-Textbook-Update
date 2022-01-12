@@ -247,15 +247,15 @@ void InitAssets()
         for (int j = 0; j < 60; j++)
         {
             int next_j = (j + 1) % 60;
-            sphere_indices[i * 120 + j * 2] = TriInd(next_i * 60 + j + 2, i * 60 + j + 2, i * 60 + next_j + 2);
-            sphere_indices[i * 120 + j * 2 + 1] = TriInd(next_i * 60 + next_j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+            sphere_indices[i * 120 + j * 2] = TriInd(i * 60 + j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+            sphere_indices[i * 120 + j * 2 + 1] = TriInd(next_i * 60 + j + 2, next_i * 60 + next_j + 2, i * 60 + next_j + 2);
         }
     }
     for (int j = 0; j < 60; j++)
     {
         int next_j = (j + 1) % 60;
-        sphere_indices[58 * 60 * 2 + j * 2] = TriInd(58 * 60 + j + 2, 58 * 60 + next_j + 2, 1);
-        sphere_indices[58 * 60 * 2 + j * 2 + 1] = TriInd(j + 2, 0, next_j + 2);
+        sphere_indices[58 * 60 * 2 + j * 2] = TriInd(58 * 60 + next_j + 2, 58 * 60 + j + 2, 1);
+        sphere_indices[58 * 60 * 2 + j * 2 + 1] = TriInd(0, j + 2, next_j + 2);
     }
 
     glCreateBuffers(1, &vertex_buffer_object);
@@ -291,7 +291,7 @@ void LoadTriangle(Vec3f v0, Vec3f v1, Vec3f v2, Vec3f color)
     vertex_buffer[cnt_vertex + 2].pos = v2;
     vertex_buffer[cnt_vertex + 2].normal = normal;
     vertex_buffer[cnt_vertex + 2].color = color;
-    index_buffer[cnt_index] = TriInd(cnt_vertex, cnt_vertex + 1, cnt_vertex + 2);
+    index_buffer[cnt_index] = TriInd(cnt_vertex, cnt_vertex + 2, cnt_vertex + 1);
     cnt_vertex += 3;
     cnt_index += 1;
 }
@@ -379,6 +379,13 @@ void LoadScene()
     LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
     LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
 
+    LoadTriangle(Vec3f(-5.0, 5.0, -5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(-5.0, 5.0, 5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(5.0, 5.0, -5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(5.0, 5.0, -5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(5.0, 5.0, -5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(5.0, -5.0, -5.0), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(5.0, -5.0, -5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(5.0, 5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+    LoadTriangle(Vec3f(5.0, -5.0, 5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+
     for (int i = 0; i < 64; i++)
         LoadSphere(balls_pos[i], ball_radius, balls_color[i]);
     
@@ -402,7 +409,7 @@ int main(void)
         return -1;
 
     /* 创建窗口 */
-    window = glfwCreateWindow(768, 768, "Texture", NULL, NULL);
+    window = glfwCreateWindow(768, 768, "Lighting", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -447,7 +454,6 @@ int main(void)
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
 
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
@@ -510,7 +516,6 @@ int main(void)
         if (glfwGetKey(window, GLFW_KEY_R)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
         if (glfwGetKey(window, GLFW_KEY_F)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
         
-
     }
 
     glfwTerminate();

@@ -6,10 +6,10 @@ in vec3 fs_color;
 
 out vec4 color0;
 
-uniform mat4 mat_trans;
+uniform sampler2D depth_map;
 
-uniform vec3 light_pos;
-uniform vec3 light_color;
+uniform mat4 mat_trans;
+uniform mat4 mat_depth;
 
 float PI = 3.14159265358979323846264338327950288419716939937510;
 float INV_PI = 1.0 / PI;
@@ -55,21 +55,38 @@ vec3 parallel_light(vec3 light_direction, vec3 light_color, vec4 frag_pos, vec4 
     if (costheta == 0.0) return vec3(0.0, 0.0, 0.0);
     return 
     costheta
-    * disney_diffuse_brdf(frag_norm.xyz, -light_direction, normalize(-frag_pos.xyz))
+    * (
+        disney_diffuse_brdf(frag_norm.xyz, -light_direction, normalize(-frag_pos.xyz))
+        //+ blinn_phong_brdf(frag_norm.xyz, -light_direction, normalize(-frag_pos.xyz))
+    )
     * light_color;
+}
+
+float CheckLightVisible(vec4 pos)
+{
+    pos = mat_depth*pos;
+    if (pos.x < -1.0 || pos.x > 1.0) return 1.0;
+    if (pos.y < -1.0 || pos.y > 1.0) return 1.0;
+    if (pos.z < -1.0 || pos.z > 1.0) return 1.0;
+    pos = (pos + vec4(1.0, 1.0, 1.0, 1.0)) * 0.5;
+
+
+    const int shadow_sample = 8;
+    float res = 0.0;
+    for (int i = -shadow_sample; i <= shadow_sample; i++)
+        for (int j = -shadow_sample; j <= shadow_sample; j++)
+            res += ((pos.z <= texture(depth_map, pos.xy + vec2( i / 2048.0, j / 2048.0)).z*1.003) ? 1.0 : 0.0);
+    return res * (1.0 / pow(shadow_sample*2+1, 2));
 }
 
 void main()
 {
-    //float scale = 
-    //pow(max(dot(normalize(fs_norm), normalize(vec4(1.0, 1.0, -1.0, 0.0))), 0.0), 1.0)
-    //* 0.5 + 0.5;
-    vec4 norm = fs_norm;
-    if ((mat_trans*fs_norm).z > 0.0) norm = -norm;
-    vec3 lighting = vec3(1.0, 1.0, 1.0) * 0.0;
-    lighting = lighting + parallel_light(normalize(mat_trans*vec4(-1.0, -1.0, 1.0, 0.0)).xyz, vec3(1.0, 1.0, 1.0) * PI, mat_trans*fs_pos, normalize(mat_trans*norm));
+    vec3 lighting = vec3(0.0, 0.0, 0.0);
+    lighting += vec3(1.0, 1.0, 1.0)*0.3;
+    lighting = lighting + 
+    CheckLightVisible(fs_pos) * 
+    0.7 * parallel_light(normalize(mat_trans*vec4(-3.0, -2.0, 1.0, 0.0)).xyz, vec3(1.0, 1.0, 1.0) * PI, mat_trans*fs_pos, normalize(mat_trans*fs_norm));
     //lighting = lighting + point_light((mat_trans*vec4(light_pos, 1.0)).xyz, light_color, mat_trans*fs_pos, normalize(mat_trans*norm));
     vec3 color = fs_color;
     color0 = vec4(color * lighting, 1.0);
-    //color0 = (fs_norm + 1.0) / 2.0;
 }

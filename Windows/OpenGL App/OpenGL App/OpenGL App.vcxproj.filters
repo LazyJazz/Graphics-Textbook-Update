@@ -32,5 +32,11 @@
     <None Include="vertex_shader.glsl">
       <Filter>着色器</Filter>
     </None>
+    <None Include="depth_fragment_shader.glsl">
+      <Filter>着色器</Filter>
+    </None>
+    <None Include="depth_vertex_shader.glsl">
+      <Filter>着色器</Filter>
+    </None>
   </ItemGroup>
 </Project>
