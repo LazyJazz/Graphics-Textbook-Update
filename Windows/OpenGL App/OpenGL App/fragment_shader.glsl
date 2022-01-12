@@ -1,15 +1,15 @@
 #version 450 core
 
-in vec4 fs_origin_norm;
 in vec4 fs_norm;
 in vec4 fs_pos;
+in vec3 fs_color;
 
 out vec4 color0;
 
 uniform mat4 mat_trans;
 
-uniform vec3 lights_pos[8];
-uniform vec3 lights_color[8];
+uniform vec3 light_pos;
+uniform vec3 light_color;
 
 float PI = 3.14159265358979323846264338327950288419716939937510;
 float INV_PI = 1.0 / PI;
@@ -29,13 +29,13 @@ float disney_diffuse_brdf(vec3 vNorm, vec3 vIn, vec3 vOut)
 float blinn_phong_brdf(vec3 vNorm, vec3 vIn, vec3 vOut)
 {
     vec3 vHalf = normalize(vIn + vOut);
-    return pow(dot(vHalf, vNorm), 50.0);
+    return pow(dot(vHalf, vNorm), 100.0);
 }
 
 float my_surface_brdf(vec3 vNorm, vec3 vIn, vec3 vOut)
 {
-    
-    return (disney_diffuse_brdf(vNorm, vIn, vOut) + blinn_phong_brdf(vNorm, vIn, vOut)) * 0.5;
+    return (
+        disney_diffuse_brdf(vNorm, vIn, vOut) + blinn_phong_brdf(vNorm, vIn, vOut)) * 0.5;
 }
 
 vec3 point_light(vec3 light_pos, vec3 light_color, vec4 frag_pos, vec4 frag_norm)
@@ -45,8 +45,18 @@ vec3 point_light(vec3 light_pos, vec3 light_color, vec4 frag_pos, vec4 frag_norm
     if (costheta == 0.0) return vec3(0.0, 0.0, 0.0);
     return 
     costheta
-    * my_surface_brdf(frag_norm.xyz,normalize(light_pos-frag_pos.xyz),normalize(-frag_pos.xyz))
+    * disney_diffuse_brdf(frag_norm.xyz,normalize(light_pos-frag_pos.xyz),normalize(-frag_pos.xyz))
     * light_color / (4.0 * PI * d * d);
+}
+
+vec3 parallel_light(vec3 light_direction, vec3 light_color, vec4 frag_pos, vec4 frag_norm)
+{
+    float costheta = max(dot(frag_norm.xyz, -light_direction), 0.0);
+    if (costheta == 0.0) return vec3(0.0, 0.0, 0.0);
+    return 
+    costheta
+    * disney_diffuse_brdf(frag_norm.xyz, -light_direction, normalize(-frag_pos.xyz))
+    * light_color;
 }
 
 void main()
@@ -54,9 +64,12 @@ void main()
     //float scale = 
     //pow(max(dot(normalize(fs_norm), normalize(vec4(1.0, 1.0, -1.0, 0.0))), 0.0), 1.0)
     //* 0.5 + 0.5;
-    vec3 lighting = vec3(0.3, 0.3, 0.3);
-    for (int i = 7; i < 8; i++)
-        lighting = lighting + point_light((mat_trans*vec4(lights_pos[i], 1.0)).xyz, lights_color[i], fs_pos, normalize(fs_norm));
-    vec3 color = vec3(1.0, 1.0, 1.0);
+    vec4 norm = fs_norm;
+    if ((mat_trans*fs_norm).z > 0.0) norm = -norm;
+    vec3 lighting = vec3(1.0, 1.0, 1.0) * 0.0;
+    lighting = lighting + parallel_light(normalize(mat_trans*vec4(-1.0, -1.0, 1.0, 0.0)).xyz, vec3(1.0, 1.0, 1.0) * PI, mat_trans*fs_pos, normalize(mat_trans*norm));
+    //lighting = lighting + point_light((mat_trans*vec4(light_pos, 1.0)).xyz, light_color, mat_trans*fs_pos, normalize(mat_trans*norm));
+    vec3 color = fs_color;
     color0 = vec4(color * lighting, 1.0);
+    //color0 = (fs_norm + 1.0) / 2.0;
 }

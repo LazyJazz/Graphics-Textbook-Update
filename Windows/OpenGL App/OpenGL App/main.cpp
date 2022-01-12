@@ -1,9 +1,11 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <cstring>
 #include <cstdint>
 #include <cmath>
 #include <thread>
+#include <random>
 
 const double pi = 3.14159265358979323846264338327950288419716939937510;
 
@@ -40,6 +42,51 @@ struct Matrix
     }
 };
 
+Matrix ProjectionMatrix(float Near, float Far, float aspect, float FOV = 0.5*pi)
+{
+    float vertical_scale = tan(FOV * 0.5);
+    return Matrix(
+        1.0f / aspect / vertical_scale, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f / vertical_scale, 0.0f, 0.0f,
+        0.0f, 0.0f, Far / (Far - Near), 1.0f,
+        0.0f, 0.0f, (Far * Near) / (Near - Far), 0.0f
+    );
+}
+
+Matrix TranslateMatrix(float x, float y, float z)
+{
+    return Matrix(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        x, y, z, 1.0
+    );
+}
+
+
+Matrix RotationMatrix(float pitch, float yaw, float roll)
+{
+    return
+        Matrix(
+            cos(yaw), 0.0, sin(yaw), 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            -sin(yaw), 0.0, cos(yaw), 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ) *
+        Matrix(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, cos(pitch), sin(pitch), 0.0,
+            0.0, -sin(pitch), cos(pitch), 0.0,
+            0.0, 0.0, 0.0, 1.0
+        ) *
+        Matrix(
+            cos(roll), -sin(roll), 0.0, 0.0,
+            sin(roll), cos(roll), 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0
+        );
+}
+
 struct Vec3f
 {
     float x, y, z;
@@ -61,6 +108,37 @@ struct Vec3f
             vec.x * mat.m[2][0] + vec.y * mat.m[2][1] + vec.z * mat.m[2][2]
         );
     }
+    Vec3f operator * (const float & scale) { return Vec3f(x*scale, y*scale, z*scale); }
+    Vec3f operator + (const Vec3f & b) { return Vec3f(x+b.x, y+b.y, z+b.z); }
+    Vec3f operator - (const Vec3f & b) { return Vec3f(x-b.x, y-b.y, z-b.z); }
+};
+
+float dot(Vec3f va, Vec3f vb) { return va.x*vb.x + va.y*vb.y + va.z*vb.z; }
+Vec3f cross(Vec3f va, Vec3f vb) { return Vec3f(va.y*vb.z - va.z*vb.y, va.z*vb.x - va.x*vb.z, va.x*vb.y - va.y*vb.x); }
+float length(Vec3f v) { return sqrt(v.x*v.x + v.y*v.y + v.z*v.z); }
+Vec3f normalize(Vec3f v) { return v*(1.0f / length(v)); }
+
+
+Matrix fake_inverse(Matrix mat)
+{
+    Matrix res = Matrix(
+        mat.m[0][0], mat.m[1][0], mat.m[2][0], 0.0f,
+        mat.m[0][1], mat.m[1][1], mat.m[2][1], 0.0f,
+        mat.m[0][2], mat.m[1][2], mat.m[2][2], 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    );
+    Vec3f b = res*Vec3f(-mat.m[3][0], -mat.m[3][1], -mat.m[3][2]);
+    res.m[3][0] = b.x;
+    res.m[3][1] = b.y;
+    res.m[3][2] = b.z;
+    return res;
+}
+
+struct Vertex
+{
+    Vec3f pos;
+    Vec3f normal;
+    Vec3f color;
 };
 
 struct TriInd
@@ -68,11 +146,15 @@ struct TriInd
     uint32_t i0, i1, i2;
     TriInd() { i0 = i1 = i2 = 0; }
     TriInd(uint32_t _i0, uint32_t _i1, uint32_t _i2) { i0 = _i0; i1 = _i1; i2 = _i2; }
+    TriInd operator + (const uint32_t offset) { return TriInd(i0+offset, i1+offset, i2+offset); }
 };
 
-Vec3f vertex_buffer[60 * 59 + 2];
+Vec3f sphere_vertices[60 * 59 + 2];
+TriInd sphere_indices[59 * 60 * 2];
 
-TriInd index_buffer[59 * 60 * 2];
+Vertex vertex_buffer[3*1048576];
+TriInd index_buffer[1048576];
+uint32_t cnt_vertex, cnt_index;
 
 uint32_t vertex_buffer_object;
 uint32_t index_buffer_object;
@@ -146,8 +228,8 @@ uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
 /* 这个函数用于初始化渲染过程中用到的资源 */
 void InitAssets()
 {
-    vertex_buffer[0] = Vec3f(0.0f, 0.0f, 1.0f);
-    vertex_buffer[1] = Vec3f(0.0f, 0.0f, -1.0f);
+    sphere_vertices[0] = Vec3f(0.0f, 0.0f, 1.0f);
+    sphere_vertices[1] = Vec3f(0.0f, 0.0f, -1.0f);
     for (int i = 1; i <= 59; i++)
     {
         float y = i * (1.0f / 60.0f) * pi;
@@ -156,7 +238,7 @@ void InitAssets()
         {
             float x = j * (1.0f / 30.0f) * pi;
             float sinx = sin(x), cosx = cos(x);
-            vertex_buffer[(i - 1) * 60 + j + 2] = Vec3f(siny * sinx, siny * cosx, cosy);
+            sphere_vertices[(i - 1) * 60 + j + 2] = Vec3f(siny * sinx, siny * cosx, cosy);
         }
     }
     for (int i = 0; i < 58; i++)
@@ -165,24 +247,22 @@ void InitAssets()
         for (int j = 0; j < 60; j++)
         {
             int next_j = (j + 1) % 60;
-            index_buffer[i * 120 + j * 2] = TriInd(i * 60 + j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
-            index_buffer[i * 120 + j * 2 + 1] = TriInd(next_i * 60 + next_j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+            sphere_indices[i * 120 + j * 2] = TriInd(i * 60 + j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
+            sphere_indices[i * 120 + j * 2 + 1] = TriInd(next_i * 60 + next_j + 2, next_i * 60 + j + 2, i * 60 + next_j + 2);
         }
     }
     for (int j = 0; j < 60; j++)
     {
         int next_j = (j + 1) % 60;
-        index_buffer[58 * 60 * 2 + j * 2] = TriInd(58 * 60 + j + 2, 58 * 60 + next_j + 2, 1);
-        index_buffer[58 * 60 * 2 + j * 2 + 1] = TriInd(j + 2, next_j + 2, 0);
+        sphere_indices[58 * 60 * 2 + j * 2] = TriInd(58 * 60 + j + 2, 58 * 60 + next_j + 2, 1);
+        sphere_indices[58 * 60 * 2 + j * 2 + 1] = TriInd(j + 2, next_j + 2, 0);
     }
 
     glCreateBuffers(1, &vertex_buffer_object);
-    glNamedBufferData(vertex_buffer_object, sizeof(vertex_buffer), nullptr, GL_STATIC_DRAW);
-    glNamedBufferSubData(vertex_buffer_object, 0, sizeof(vertex_buffer), vertex_buffer);
+    glNamedBufferData(vertex_buffer_object, sizeof(vertex_buffer), nullptr, GL_DYNAMIC_DRAW);
 
     glCreateBuffers(1, &index_buffer_object);
-    glNamedBufferData(index_buffer_object, sizeof(index_buffer), nullptr, GL_STATIC_DRAW);
-    glNamedBufferSubData(index_buffer_object, 0, sizeof(index_buffer), index_buffer);
+    glNamedBufferData(index_buffer_object, sizeof(index_buffer), nullptr, GL_DYNAMIC_DRAW);
 
 
     uint32_t vertex_shader_object = CompileGLSLShaderFromFile("vertex_shader.glsl", GL_VERTEX_SHADER);
@@ -191,55 +271,126 @@ void InitAssets()
     shader_program_object = LinkProgram(vertex_shader_object, fragment_shader_object);
     glDeleteShader(vertex_shader_object);
     glDeleteShader(fragment_shader_object);
-
-    //glCreateTextures(GL_TEXTURE_2D, 1, &texture_object);
-    //glBindTexture(GL_TEXTURE_2D, texture_object);
-    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, 256, 256, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
-    //glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-Matrix ProjectionMatrix(float Near, float Far, float aspect)
+void ResetScene()
 {
-    return Matrix(
-        1.0f / aspect, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, Far / (Far - Near), 1.0f,
-        0.0f, 0.0f, (Far * Near) / (Near - Far), 0.0f
-    );
+    cnt_index = 0;
+    cnt_vertex = 0;
 }
 
-Matrix TranslateMatrix(float x, float y, float z)
+void LoadTriangle(Vec3f v0, Vec3f v1, Vec3f v2, Vec3f color)
 {
-    return Matrix(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        x, y, z, 1.0
-    );
+    Vec3f normal = normalize(cross(v1 - v0, v2 - v0));
+    vertex_buffer[cnt_vertex].pos = v0;
+    vertex_buffer[cnt_vertex].normal = normal;
+    vertex_buffer[cnt_vertex].color = color;
+    vertex_buffer[cnt_vertex + 1].pos = v1;
+    vertex_buffer[cnt_vertex + 1].normal = normal;
+    vertex_buffer[cnt_vertex + 1].color = color;
+    vertex_buffer[cnt_vertex + 2].pos = v2;
+    vertex_buffer[cnt_vertex + 2].normal = normal;
+    vertex_buffer[cnt_vertex + 2].color = color;
+    index_buffer[cnt_index] = TriInd(cnt_vertex, cnt_vertex + 1, cnt_vertex + 2);
+    cnt_vertex += 3;
+    cnt_index += 1;
 }
 
-
-Matrix RotationMatrix(float pitch, float yaw, float roll)
+void LoadSphere(Vec3f origin, float radius, Vec3f color)
 {
-    return
-        Matrix(
-            cos(yaw), 0.0, sin(yaw), 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            -sin(yaw), 0.0, cos(yaw), 0.0,
-            0.0, 0.0, 0.0, 1.0
-        ) *
-        Matrix(
-            1.0, 0.0, 0.0, 0.0,
-            0.0, cos(pitch), sin(pitch), 0.0,
-            0.0, -sin(pitch), cos(pitch), 0.0,
-            0.0, 0.0, 0.0, 1.0
-        ) *
-        Matrix(
-            cos(roll), -sin(roll), 0.0, 0.0,
-            sin(roll), cos(roll), 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0
-        );
+    for (int i = 0; i < 60*59+2; i++)
+    {
+        vertex_buffer[i+cnt_vertex].pos = sphere_vertices[i] * radius + origin;
+        vertex_buffer[i+cnt_vertex].normal = sphere_vertices[i];
+        vertex_buffer[i+cnt_vertex].color = color;
+    }
+    for (int i = 0; i < 60*59*2; i++)
+        index_buffer[i + cnt_index] = sphere_indices[i] + cnt_vertex;
+    cnt_vertex += 60 * 59 + 2;
+    cnt_index += 60 * 59 * 2;
+}
+
+Vec3f balls_pos[64];
+Vec3f balls_velocity[64];
+Vec3f balls_color[64];
+const float ball_radius = 0.8;
+const float absorb_scale = 0.8;
+
+void InitBalls()
+{
+    std::mt19937 rd(2022);
+    std::uniform_real_distribution<float> d(-1.0, 1.0);
+    std::uniform_real_distribution<float> d_color(0.0, 1.0);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            for (int  k = 0; k < 4; k++)
+            {
+                balls_pos[i*16 + j*4 + k] = Vec3f(
+                    -3.0 + i * 2.0,
+                    -3.0 + j * 2.0,
+                    -3.0 + k * 2.0
+                );
+                balls_velocity[i*16 + j*4 + k] = Vec3f(d(rd), d(rd), d(rd));
+                balls_color[i*16 + j*4 + k] = Vec3f(d_color(rd), d_color(rd), d_color(rd));
+            }
+}
+
+void BallCollision(int i, int j)
+{
+    Vec3f direction = normalize(balls_pos[j] - balls_pos[i]);
+    Vec3f relative_velocity = balls_velocity[i] - balls_velocity[j];
+    Vec3f impulse = direction * fmaxf(dot(direction, relative_velocity), 0.0f) * (0.5 + 0.5*absorb_scale);
+    balls_velocity[j] = balls_velocity[j] + impulse;
+    balls_velocity[i] = balls_velocity[i] - impulse;
+}
+
+void UpdateBalls(float time_step)
+{
+    for (int i = 0; i < 64; i++)
+        balls_velocity[i].y -= 9.8*time_step;
+    for (int t = 0; t < 5; t++)
+    {
+        for (int i = 0; i < 64; i++)
+            for (int j = i + 1; j < 64; j++)
+                if (length(balls_pos[i] - balls_pos[j]) <= ball_radius * 2.0)
+                    BallCollision(i, j);
+        for (int i = 0; i < 64; i++)
+        {
+            if (balls_pos[i].x > 5.0 - ball_radius) balls_velocity[i].x = fminf(balls_velocity[i].x, -balls_velocity[i].x * absorb_scale);
+            if (balls_pos[i].x < -5.0 + ball_radius) balls_velocity[i].x = fmaxf(balls_velocity[i].x, -balls_velocity[i].x * absorb_scale);
+            if (balls_pos[i].y > 5.0 - ball_radius) balls_velocity[i].y = fminf(balls_velocity[i].y, -balls_velocity[i].y * absorb_scale);
+            if (balls_pos[i].y < -5.0 + ball_radius) balls_velocity[i].y = fmaxf(balls_velocity[i].y, -balls_velocity[i].y * absorb_scale);
+            if (balls_pos[i].z > 5.0 - ball_radius) balls_velocity[i].z = fminf(balls_velocity[i].z, -balls_velocity[i].z * absorb_scale);
+            if (balls_pos[i].z < -5.0 + ball_radius) balls_velocity[i].z = fmaxf(balls_velocity[i].z, -balls_velocity[i].z * absorb_scale);
+        }
+    }
+    for (int i = 0; i < 64; i++)
+        balls_pos[i] = balls_pos[i] + balls_velocity[i] * time_step;
+}
+
+void LoadScene()
+{
+    ResetScene();
+
+    LoadTriangle(Vec3f(5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(5.0, -5.0, 5.0), Vec3f(5.0, -5.0, -5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(-5.0, 5.0, 5.0), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(5.0, 5.0, 5.0), Vec3f(5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+    LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+
+    for (int i = 0; i < 64; i++)
+        LoadSphere(balls_pos[i], ball_radius, balls_color[i]);
+    
+    glNamedBufferSubData(vertex_buffer_object, 0, sizeof(Vertex) * cnt_vertex, vertex_buffer);
+    glNamedBufferSubData(index_buffer_object, 0, sizeof(TriInd) * cnt_index, index_buffer);
+}
+
+void Print(Matrix mat)
+{
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            printf("%.3f%c", mat.m[i][j], (j == 3) ? '\n' : '\t');
 }
 
 int main(void)
@@ -277,48 +428,29 @@ int main(void)
 
     InitAssets();
 
-    int32_t mat_proj_location, mat_trans_location, lights_pos_location, lights_color_location;
+    int32_t mat_proj_location, mat_trans_location, light_pos_location, light_color_location;
     mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
     mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
-    lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
-    lights_color_location = glGetUniformLocation(shader_program_object, "lights_color");
+    light_pos_location = glGetUniformLocation(shader_program_object, "light_pos");
+    light_color_location = glGetUniformLocation(shader_program_object, "light_color");
 
     glEnable(GL_DEPTH_TEST);
 
-    Vec3f lights_pos[8] = {
-        {-10.0f, -10.0f,  10.0f},
-        {-10.0f,  10.0f, -10.0f},
-        {-10.0f,  10.0f,  10.0f},
-        { 10.0f, -10.0f, -10.0f},
-        { 10.0f, -10.0f,  10.0f},
-        { 10.0f,  10.0f, -10.0f},
-        { 10.0f,  10.0f,  10.0f},
-        { 100.0f, 100.0f, -100.0f}
-    };
-    Vec3f lights_color[8] = {
-        { 0.0f,  0.0f, 1000.0f},
-        { 0.0f, 1000.0f,  0.0f},
-        { 0.0f, 1000.0f, 1000.0f},
-        {1000.0f,  0.0f,  0.0f},
-        {1000.0f,  0.0f, 1000.0f},
-        {1000.0f, 1000.0f,  0.0f},
-        {1000.0f, 1000.0f, 1000.0f},
-        {1000000.0f, 1000000.0f, 1000000.0f}
-    };
-    Matrix lights_rotation[8] = {
-        RotationMatrix(0.00f, 0.01f, 0.01f),
-        RotationMatrix(0.01f, 0.00f, 0.01f),
-        RotationMatrix(0.00f, 0.00f, 0.01f),
-        RotationMatrix(0.01f, 0.01f, 0.00f),
-        RotationMatrix(0.00f, 0.01f, 0.00f),
-        RotationMatrix(0.01f, 0.00f, 0.00f),
-        RotationMatrix(0.00f, 0.00f, 0.00f),
-        RotationMatrix(0.001f, 0.002f, 0.003f)
-    };
+    Vec3f light_pos = { 100.0f, 100.0f, -100.0f};
+    Vec3f light_color = {1000000.0f, 1000000.0f, 1000000.0f};
+    Matrix light_rotation = Matrix(1.0f);//RotationMatrix(0.001f, 0.002f, 0.003f);
+
+    glfwSwapInterval(1);
+
+    Matrix CameraRotation = RotationMatrix(0.19*pi, 0.225*pi, 0.0);
+    Vec3f CameraTranslation = Vec3f(9.0, 9.0f, -11.0f);
+
+    InitBalls();
 
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
+        LoadScene();
         /* 在这里实现渲染代码 */
         glClearColor(0.0, 0.0, 0.0, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -329,35 +461,33 @@ int main(void)
         glViewport(0, 0, width, height);
         glUseProgram(shader_program_object);
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 12, (void*)0);
-        glEnableVertexAttribArray(0);
-        //glEnableVertexAttribArray(1);
-
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        //glBindTexture(GL_TEXTURE_2D, texture_object);
-        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, (void*)0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, false, 36, (void*)12);
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, 36, (void*)24);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
 
         Matrix mat_proj, mat_trans;
-        mat_proj = ProjectionMatrix(1.0f, 10.0f, (float)width / (float)height);
-        mat_trans = TranslateMatrix(0.0f, 0.0f, 5.0f);
+        mat_proj = ProjectionMatrix(1.0f, 100.0f, (float)width / (float)height, pi / 3.0);
+        mat_trans = fake_inverse(TranslateMatrix(CameraTranslation.x, CameraTranslation.y, CameraTranslation.z) * CameraRotation);
         glUniformMatrix4fv(mat_proj_location, 1, 0, (float*)&mat_proj);
         glUniformMatrix4fv(mat_trans_location, 1, 0, (float*)&mat_trans);
 
-        for (int i = 0; i < 8; i++) lights_pos[i] = lights_rotation[i] * lights_pos[i];
-        glUniform3fv(lights_pos_location, 8, (float*)lights_pos);
-        glUniform3fv(lights_color_location, 8, (float*)lights_color);
-
-        glDrawElements(GL_TRIANGLES, 59*120*3, GL_UNSIGNED_INT, nullptr);
+        light_pos = light_rotation * light_pos;
+        glUniform3fv(light_pos_location, 1, (float*)&light_pos);
+        glUniform3fv(light_color_location, 1, (float*)&light_color);
+        glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
 
         /* 交换缓冲 */
         glfwSwapBuffers(window);
 
         /* 处理窗口消息 */
         glfwPollEvents();
-        //std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+        for (int i = 0; i < 10; i++)
+            UpdateBalls(0.002);
     }
 
     glfwTerminate();
