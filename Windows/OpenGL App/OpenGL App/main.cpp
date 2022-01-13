@@ -312,14 +312,6 @@ void InitAssets()
     glReadBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    Matrix depth_map_mat_trans = Matrix(
-        0.12, 0.0, 0.0, 0.0,
-        0.0, 0.12, 0.0, 0.0,
-        0.0, 0.0, 1.0 / 99.0, 0.0,
-        0.0, 0.0,-1.0 / 99.0, 1.0
-    ) * fake_inverse(LookAtMatrix(Vec3f(30.0, 20.0, -10.0), Vec3f(0.0, 0.0, 0.0)));
-    glProgramUniformMatrix4fv(depth_shader_program_object, glGetUniformLocation(depth_shader_program_object, "mat_trans"), 1, false, (float*)&depth_map_mat_trans);
-    glProgramUniformMatrix4fv(shader_program_object, glGetUniformLocation(shader_program_object, "mat_depth"), 1, false, (float*)&depth_map_mat_trans);
 }
 
 void ResetScene()
@@ -362,8 +354,12 @@ void LoadSphere(Vec3f origin, float radius, Vec3f color)
 Vec3f balls_pos[64];
 Vec3f balls_velocity[64];
 Vec3f balls_color[64];
+
+/* 球的半径 */
 const float ball_radius = 0.8;
-const float absorb_scale = 0.8;
+
+/* 弹性系数，应小于 1 */
+const float elastic = 0.8;
 
 void InitBalls()
 {
@@ -388,7 +384,7 @@ void BallCollision(int i, int j)
 {
     Vec3f direction = normalize(balls_pos[j] - balls_pos[i]);
     Vec3f relative_velocity = balls_velocity[i] - balls_velocity[j];
-    Vec3f impulse = direction * fmaxf(dot(direction, relative_velocity), 0.0f) * (0.5 + 0.5*absorb_scale);
+    Vec3f impulse = direction * fmaxf(dot(direction, relative_velocity), 0.0f) * (0.5 + 0.5*elastic);
     balls_velocity[j] = balls_velocity[j] + impulse;
     balls_velocity[i] = balls_velocity[i] - impulse;
 }
@@ -405,12 +401,12 @@ void UpdateBalls(float time_step)
                     BallCollision(i, j);
         for (int i = 0; i < 64; i++)
         {
-            if (balls_pos[i].x > 5.0 - ball_radius) balls_velocity[i].x = fminf(balls_velocity[i].x, -balls_velocity[i].x * absorb_scale);
-            if (balls_pos[i].x < -5.0 + ball_radius) balls_velocity[i].x = fmaxf(balls_velocity[i].x, -balls_velocity[i].x * absorb_scale);
-            if (balls_pos[i].y > 5.0 - ball_radius) balls_velocity[i].y = fminf(balls_velocity[i].y, -balls_velocity[i].y * absorb_scale);
-            if (balls_pos[i].y < -5.0 + ball_radius) balls_velocity[i].y = fmaxf(balls_velocity[i].y, -balls_velocity[i].y * absorb_scale);
-            if (balls_pos[i].z > 5.0 - ball_radius) balls_velocity[i].z = fminf(balls_velocity[i].z, -balls_velocity[i].z * absorb_scale);
-            if (balls_pos[i].z < -5.0 + ball_radius) balls_velocity[i].z = fmaxf(balls_velocity[i].z, -balls_velocity[i].z * absorb_scale);
+            if (balls_pos[i].x > 5.0 - ball_radius) balls_velocity[i].x = fminf(balls_velocity[i].x, -balls_velocity[i].x * elastic);
+            if (balls_pos[i].x < -5.0 + ball_radius) balls_velocity[i].x = fmaxf(balls_velocity[i].x, -balls_velocity[i].x * elastic);
+            if (balls_pos[i].y > 5.0 - ball_radius) balls_velocity[i].y = fminf(balls_velocity[i].y, -balls_velocity[i].y * elastic);
+            if (balls_pos[i].y < -5.0 + ball_radius) balls_velocity[i].y = fmaxf(balls_velocity[i].y, -balls_velocity[i].y * elastic);
+            if (balls_pos[i].z > 5.0 - ball_radius) balls_velocity[i].z = fminf(balls_velocity[i].z, -balls_velocity[i].z * elastic);
+            if (balls_pos[i].z < -5.0 + ball_radius) balls_velocity[i].z = fmaxf(balls_velocity[i].z, -balls_velocity[i].z * elastic);
         }
     }
     for (int i = 0; i < 64; i++)
@@ -485,11 +481,14 @@ int main(void)
 
     InitAssets();
 
-    int32_t mat_proj_location, mat_trans_location;
+    int32_t mat_proj_location, mat_trans_location, v_light_direct_location, depth_mat_trans_location, mat_depth_location;
     mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
     mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
+    v_light_direct_location = glGetUniformLocation(shader_program_object, "v_light_direct");
+    depth_mat_trans_location = glGetUniformLocation(depth_shader_program_object, "mat_trans");
+    mat_depth_location = glGetUniformLocation(shader_program_object, "mat_depth");
 
-    glfwSwapInterval(0);
+    glfwSwapInterval(1);
 
     Matrix CameraRotation = RotationMatrix(0.19*pi, 0.225*pi, 0.0);
     Vec3f CameraTranslation = Vec3f(9.0, 9.0f, -11.0f);
@@ -505,21 +504,33 @@ int main(void)
 
     std::chrono::steady_clock::time_point tp = std::chrono::steady_clock::now();
 
-    for (int i = 0; i < 1000; i++)
-        UpdateBalls(0.002);
+    Vec3f v_light_direct = Vec3f(-3.0, -1.0, 2.0);
 
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
+        /* 帧绘制用时统计 */
         std::chrono::steady_clock::time_point this_tp = std::chrono::steady_clock::now();
         std::cout << "Last frame time used: " << (this_tp - tp) / std::chrono::milliseconds(1) << "ms\n";
         tp = this_tp;
 
-        CameraRotation = RotationMatrix(camera_pitch, camera_yaw, 0.0);
+        /* 更新光源方向 */
+        v_light_direct = RotationMatrix(0.0, 0.003, 0.0) * v_light_direct;
+        Matrix depth_map_mat_trans = Matrix(
+            0.12, 0.0, 0.0, 0.0,
+            0.0, 0.12, 0.0, 0.0,
+            0.0, 0.0, 1.0 / 99.0, 0.0,
+            0.0, 0.0, -1.0 / 99.0, 1.0
+        ) * fake_inverse(LookAtMatrix(v_light_direct * -10.0, Vec3f(0.0, 0.0, 0.0)));
+        glProgramUniformMatrix4fv(depth_shader_program_object, depth_mat_trans_location, 1, false, (float*)&depth_map_mat_trans);
+        glProgramUniformMatrix4fv(shader_program_object, mat_depth_location, 1, false, (float*)&depth_map_mat_trans);
+        glProgramUniform3fv(shader_program_object, v_light_direct_location, 1, (float*)&v_light_direct);
+
+        /* 加载场景 */
         LoadScene();
 
 
-        /* 在这里实现渲染代码 */
+        /* 渲染阴影图 */
 
         glBindFramebuffer(GL_FRAMEBUFFER, depth_map_framebuffer_object);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -532,6 +543,8 @@ int main(void)
         glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
         glDisableVertexAttribArray(0);
 
+
+        /* 渲染最终画面 */
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glClearColor(0.0, 0.0, 0.0, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -576,6 +589,8 @@ int main(void)
         for (int i = 0; i < 10; i++)
             UpdateBalls(0.002);
 
+
+        /* 处理输入 */
         const float move_speed = 0.05;
         if (glfwGetKey(window, GLFW_KEY_W)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
         if (glfwGetKey(window, GLFW_KEY_S)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
@@ -597,6 +612,8 @@ int main(void)
             last_x = xpos;
             last_y = ypos;
         }
+
+        CameraRotation = RotationMatrix(camera_pitch, camera_yaw, 0.0);
     }
 
     glfwTerminate();
