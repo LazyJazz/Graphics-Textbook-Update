@@ -1988,7 +1988,7 @@ GL\_TEXTURE\_WRAP\_S 和 GL\_TEXTURE\_WRAP\_T
 开发者可以通过编写不同的着色器实现复杂的光照计算，
 但这的确给开发者造成了更多的负担。
 
-\subsubsection{实现光照}
+\subsubsection{光照原理}
 
 光照计算的根本目的是给绘制的物体赋予正确的亮度值，
 而不是像之前的样例中用一个设置好的颜色作为最终的图像颜色。
@@ -2009,30 +2009,264 @@ GL\_TEXTURE\_WRAP\_S 和 GL\_TEXTURE\_WRAP\_T
 而是对在场景中经过许多次反射，
 照亮了处于阴影区的物体的那部分光能的抽象。
 
+综合这三种光源类型，可以写出如下进行光照计算的片段着色器框架：
+
+\begin{lstlisting}
+vec3 lighting(vec3 frag_pos, vec3 frag_norm, vec3 frag_color)
+{
+    /* 用于统计被反射到出射光方向的总亮度 */
+    vec3 reflected_light = vec3(0.0, 0.0, 0.0);
+    /* 计算点光源贡献 */
+    reflected_light += point_light(frag_pos, frag_norm);
+    /* 计算平行光源贡献 */
+    reflected_light += parrallel_light(frag_pos, frag_norm);
+    /* 计算环境光贡献 */
+    reflected_light += ambient_light(frag_pos, frag_norm);
+    /* 最终亮度还需要乘以反射率，以表现物体的颜色 */
+    return frag_color * incoming_light;
+}
+\end{lstlisting}
+
 与观察者观察到的物体亮度密切相关的还包括物体表面的材质，
-物体表面的材质决定了一束光线打到这个表面时反，射光线的分布。
+物体表面的材质决定了一束光线打到这个表面时反射光线的分布。
 结合以上两点，可以得到计算光照的公式：
 
-$$L_o=L_i\cos\theta_i\rho\left(\omega_o, \omega_n, \omega_i\right)$$
+$$L_o=L_i\cos\theta_iR\left(v_i, v_n, v_o\right)$$
 
 其中，
-$L_o$ 表示出射光亮度；
-$L_i$ 表示入射光亮度；
-$\theta_i$ 表示入射光方向与物体表面法线的夹角；
+$L_o$ 表示出射光亮度。
+$L_i$ 表示入射光亮度。
+$\theta_i$ 表示入射光方向与物体表面法线的夹角。
 $\cos\theta_i$ 一项表示入射光分摊面积与入射光截面面积之比，
-这一项保证了入射角较大时，物体表面亮度会相应降低；
-$\omega_o$ 表示出射光方向，即视点方向；
-$\omega_i$ 表示入射光方向，即光源方向；
-$\omega_n$ 表示物体表面法向；
-$\rho$ 函数表示入射光方向和法向量给定时，不同出射光方向的概率密度。
+这一项保证了入射角较大时，物体表面亮度会相应降低。
+$v_i$ 表示入射光方向，即光源方向。
+$v_n$ 表示物体表面法向。
+$v_o$ 表示出射光方向，即视点方向。
+$R$ 函数表示入射光方向和法向量给定时，
+不同出射光方向的亮度系数，
+这一项主要用于表现不同材质的表面，
+故且称之为“反射模型函数”；
+这个函数形式上十分类似双向反射分布函数(BRDF)，
+只不过为了简化表述，
+它可以省去许多基于物理规则的约束，
+以更直观地作用于最终图像。
 
-对于点光源，入射光亮度一般为 $L_i=\frac{I}{d^2}$，
-其中 $I$ 为点光源的光强，$d$ 为点光源位置到物体表面点的距离，点光源的亮度衰减应符合平方反比率。
+在实际实现中，以上公式主要作为一个参考，
+因为光栅化渲染不能完美地模拟物理的光照过程，
+实际的代码会包含很多经验性的人工设计元素以贴合真实感的效果，
+从而使画面更美观。
+但经验的东西往往不会过于偏离基本原理，
+因此可以由以上公式得出适用于不同光照模型的通用伪代码：
+
+\begin{lstlisting}
+vec3 xxx_light(vec3 frag_pos, vec3 frag_norm)
+{
+    vec3 vIn = normalize(light_direction);
+    vec3 vNorm = frag_norm; 
+    vec3 vOut = normalize(camera_pos - frag_pos);
+    float cos_theta_i = max(dot(vNorm, vIn), 0.0);
+    return 
+    incoming_light(frag_pos) * 
+    cos_theta_i * 
+    reflect_model(vIn, vNorm, vOut);
+}
+\end{lstlisting}
+
+接下来，只需要确定入射光亮度函数 incoming\_light 
+和反射模型函数 reflect\_model，
+即可完成光照着色器的编写。
+
+\subsubsection{实现光源}
+
+对于点光源，入射光亮度会随着距离的增加而衰减。
+如果严格按照符合物理规律的平方反比率计算衰减，
+得到入射光亮度公式为 $L_i=\frac{I}{d^2}$。
+其中 $I$ 为点光源的强度，$d$ 为点光源位置到物体表面点的距离。
+但这样的公式在 $d$ 趋近于 $0$ 时，计算得到的亮度会趋于 $+\infty$，
+体现到图像上就会变成一个特别亮的光斑，
+十分不美观。
+因此，在实现点光源时，通常会将衰减项增加一个一次项和一个常数项，
+公式变为 $L_i=\frac{I}{k_qd^2 + k_pd + k_c}$。
+$k_q$ 为二次项系数，$k_p$ 为一次项系数，$k_c$ 为常数项系数。
+这三个系数可以完全自定义，从而实现不同的光照效果。
+综上可得如下计算点光源贡献的函数：
+\begin{lstlisting}
+vec3 point_light(vec3 frag_pos, vec3 frag_norm)
+{
+    vec3 vLight = light_pos - frag_pos;
+    vec3 vIn = normalize(vLight);
+    vec3 vNorm = frag_norm; 
+    vec3 vOut = normalize(camera_pos - frag_pos);
+    float cos_theta_i = max(dot(vNorm, vIn), 0.0);
+    float d = length(vLight);
+    return 
+    (light_brightness / (Kq*d*d + Kp*d + Kc)) * 
+    cos_theta_i * 
+    reflect_model(vIn, vNorm, vOut);
+}
+\end{lstlisting}
+
 对于平行光源，入射光亮度一般为常数，
-因为平行光源不会随着距离衰减。
+因为平行光源的亮度不会跟随距离发生变化。
+而平行光源的入射光方向也是确定的，
+因此，计算平行光源贡献的函数相对简单：
+\begin{lstlisting}
+vec3 parallel_light(vec3 frag_pos, vec3 frag_norm)
+{
+    vec3 vIn = normalize(parallel_light_direction);
+    vec3 vNorm = frag_norm; 
+    vec3 vOut = normalize(camera_pos - frag_pos);
+    float cos_theta_i = max(dot(vNorm, vIn), 0.0);
+    return 
+    parallel_light_brightness * 
+    cos_theta_i * 
+    reflect_model(vIn, vNorm, vOut);
+}
+\end{lstlisting}
 
+对于环境光，其物理过程最为复杂。
+这种类型的光照没有统一的出发点，
+没有统一的方向，因此很难准确地进行计算。
+但由于其存在于整个场景，
+在不考虑严谨性的情况下，
+将环境光近似为一个无处不在的亮度均值即可得到不错的效果。
+因此，模拟环境光的代码十分简单，返回一个常数即可：
+
+\begin{lstlisting}
+vec3 ambient_light(vec3 frag_pos, vec3 frag_norm)
+{
+    return ambient_constant;
+}    
+\end{lstlisting}
+
+这样的近似肯定是失真的，
+它的主要作用是防止没有其他类型的光照可达的区域变成一片漆黑，
+当完全没有其他类型的光照，且环境光为 $(1.0, 1.0, 1.0)$ 时，
+效果等同于没有考虑光照时，直接将物体颜色绘制出来。
+
+对于环境光的探索肯定不会止步于如此简单的模型，
+研究者们提出了很多用于改进环境光效果的方法，
+比如在大型 3D 游戏的画面设置中常见的 “环境光遮蔽”。
+这类方法可以改善场景中一些细节处的层次细节，
+比如缝隙，墙角，衣服褶皱等。
+此类方法的原理和实现较为复杂，
+在此不再进行展开，
+可以自行查阅相关资料进行学习。
+
+\subsubsection{实现反射模型}
+
+反射模型决定了物体表面的质感，
+现实生活中，有的物体粗糙，有的物体光滑。
+当一束光照到物体表面时，
+物体表面的性质决定了出射光的分布情况。
+
+对于粗糙表面，应用的反射模型为漫反射模型。
+在理想情况下，无论入射光的方向为何，其产生的出射光都是均匀分布的。
+当入射光不变时，从任何角度观察这个表面，所观察到的亮度都是相同的。
+这种理想漫反射模型被称作“朗伯(Lambertian)模型”，
+对应的反射模型函数也十分简单，无论入射光方向、物体表面法向、出射光方向为何，返回一个常数即可：
+
+\begin{lstlisting}
+float lambertian_reflect_model(vec3 vIn, vec3 vNorm, vec3 vOut)
+{
+    return 1.0;
+}
+\end{lstlisting}
+
+通过漫反射模型，可以绘制出如图 \ref{fig-gl:lambertian-model} 所示的效果。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{imgs/sec 7.1/lighting.png}
+    \caption{漫反射模型的效果}
+    \label{fig-gl:lambertian-model}
+\end{figure}
+
+可以看出，应用漫反射模型后，所得到的效果相比无光照的效果已经有了非常大的提升。
+但如果场景中的物体都是漫反射表面，未免有些太过单调。
+因此，除漫反射模型外，渲染器一般还会实现镜面反射模型。
+需要注意的是，镜面反射模型并不是严格遵循反射定律的模型，
+它近似的并不是完美的镜面，而是一个相对光滑的，
+出射光在镜面反射出射方向附近分布较多的表面。
+
+为了便于理解镜面反射模型中的设计，需要引入“微表面模型”的概念。
+如前文所述，
+物体表面的性质是用一个和入射光方向，出射光方向和物体表面法向相关的分布函数表示的，
+直接构造一个这样的分布函数容易变成描述出射光方向的特征，而非物体表面性质的特征。
+换一种视角思考，直接从物体表面的性质出发，
+想象物体的表面实际上是由许多细小的微表面构成，
+这些微表面具有自己的法向。
+当入射光线抵达微表面时，严格按照微表面法向及反射定律产生出射光。
+当需要描述物体表面的性质时，只需要描述微表面法向的分布即可。
+可以想象，当微表面法向分布集中于真正的物体表面法向附近时，物体表面的宏观表现较为光滑；
+当微表面法向分布较为混乱时，物体表面的宏观表现较为粗糙。
+当构造一个反射模型函数时，可以先定义出微表面法向的分布函数，
+再由入射光方向和出射光方向计算出对应的微表面法向，
+进而得到反射模型的分布。
+由入射光方向 $v_i$ 和出射光方向 $v_o$ 计算得到的“微表面法向”被称作“半向量”，
+因为计算的方法就是入射光方向和出射光方向各取一半，再进行归一化。
+得到半向量计算公式 $v_{h} = \text{normalize}(v_i + v_o)$。
+
+由微表面模型构造的反射模型函数具有如下形式：
+
+$$
+R(v_i, v_n, v_o) = M(v_h, v_n)
+$$
+
+函数 $M$ 是描述微表面法向分布的函数。
+在著名的 Blinn-Phong 模型中，$M$ 函数的定义如下，其中 $shininess$ 表示物体表面的光亮度，
+光亮度越高，微表面法线分布越集中与宏观表面发现附近，从而产生更光滑的效果：
+
+$$
+M_{\text{Blinn\_Phong}}(v_h, v_n)=dot(v_h, v_n)^{shininess}
+$$
+
+注：Blinn-Phong模型本身不是用微表面模型描述的，但可以用微表面模型进行理解。
+此外，由于Blinn-Phong模型本身不带有 $\cos\theta_i$ 项，
+故将上述函数带入前文中的框架中也并非原始的 Blinn-Phong 模型。
+但由于 Blinn-Phong 本身为经验模型，而非物理模型，
+故在其基础上进行一些修改也无伤大雅，不会造成更多的错误，
+应看重其启发意义。
+
+由上述理论可以设计得到光滑表面的反射模型函数：
+
+\begin{lstlisting}
+float specular_reflect_model(vec3 vIn, vec3 vNorm, vec3 vOut)
+{
+    vec3 vHalf = normalize(vIn + vOut);
+    return pow(max(dot(vHalf, vNorm), 0), 100);
+}
+\end{lstlisting}
+
+将其叠加在漫反射模型上后，绘制出的图像效果如图 \ref{fig-gl:high-light} 所示。
+可以看到，图像中的小球都绘制出了高光效果。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.5\linewidth]{imgs/sec 7.1/high-light.png}
+\caption{得到高光效果}
+\label{fig-gl:high-light}
+\end{figure}
+
+基于反射模型的功能十分强大，本小节所示的两个样例仅仅是冰山一角，
+利用不同的反射模型可以绘制出许多不同的物体材质。
+如前文所述，本节内容中使用的“反射模型函数”本质上是双向反射分布函数（BRDF）的变种，
+在工业界，已经存在许多复杂的 BRDF，
+如迪士尼公司提出的“迪士尼原则的 BRDF”，
+它允许艺术工作者使用许多直观的参数描述不同观感的材质，
+兼具强大功能性与易用性。
+相关资料十分丰富，可自行查阅。
 
 \subsubsection{绘制阴影}
+
+现在，虽然已经成功实现了光照，
+但效果还不能让人完全满意，
+因为还缺少光照系统中一个重要的组成部分：阴影。
+
+绘制
+
+
+
 
 \subsection{更多学习资源}
 
