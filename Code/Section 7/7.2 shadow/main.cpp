@@ -519,8 +519,8 @@ int main(void)
         Matrix depth_map_mat_trans = Matrix(
             0.12, 0.0, 0.0, 0.0,
             0.0, 0.12, 0.0, 0.0,
-            0.0, 0.0, 1.0 / 99.0, 0.0,
-            0.0, 0.0, -1.0 / 99.0, 1.0
+            0.0, 0.0, 1.0 / 25.0, 0.0,
+            0.0, 0.0, -1.0, 1.0
         ) * fake_inverse(LookAtMatrix(v_light_direct * -10.0, Vec3f(0.0, 0.0, 0.0)));
         glProgramUniformMatrix4fv(depth_shader_program_object, depth_mat_trans_location, 1, false, (float*)&depth_map_mat_trans);
         glProgramUniformMatrix4fv(shader_program_object, mat_depth_location, 1, false, (float*)&depth_map_mat_trans);

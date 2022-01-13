@@ -1944,11 +1944,170 @@ GL\_TEXTURE\_WRAP\_S 和 GL\_TEXTURE\_WRAP\_T
 
 \subsection{高级技术}
 
+这一节的将介绍一些 OpenGL 的高级使用技巧。
+
 \subsubsection{帧缓冲}
+
+到目前为止，所有的绘制指令都是将图像直接绘制到显示窗口的缓冲区的。
+但在许多时候，程序需要先将一些中间图像绘制到不可见的缓冲区中，
+再通过这些缓冲区中的图像生成最终图像。
+这种不直接绘制到窗口缓冲的技术被称作“离屏渲染”。
+
+在 OpenGL 中实现离屏渲染需要用到帧缓冲对象（FrameBuffer）。
+一个帧缓冲对象可以保存一组颜色纹理和一个深度纹理，
+把帧缓冲对象绑定到渲染流水线上后调用绘制指令，
+OpenGL 就会将图像绘制到对应的纹理中。
+默认的帧缓冲是由 GLFW 负责创建的，对应窗口区域的颜色缓冲和深度缓冲。
+创建一个帧缓冲并绑定一组纹理的方法如下：
+
+\begin{lstlisting}
+glCreateFramebuffers(1, &framebuffer_object);
+glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_object);
+glFramebufferTexture2D(
+    GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 
+    depth_texture, 0
+);
+
+uint32_t color_attachments[n_render_target];
+
+for (int i = 0; i < n_render_target; i++)
+{
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D,
+        color_texture[i], 0
+    );
+    color_attachments[i] = GL_COLOR_ATTACHMENT0 + i;
+}
+
+glDrawBuffers(n_render_target, color_attachments);
+
+glBindFramebuffer(GL_FRAMEBUFFER, 0);
+\end{lstlisting}
+
+glCreateFramebuffers 和 glBindFramebuffer 函数功能与其它同类函数类似，不再进行解释。
+glFramebufferTexture2D 函数用于将纹理对象绑定到当前帧缓冲中。
+其中 GL\_COLOR\_ATTACHMENTi 和 GL\_DEPTH\_ATTACHMENT 用于分别指定颜色缓冲和深度缓冲的绑定点。
+由 GL\_COLOR\_ATTACHMENTi 的编号功能可以看出，
+颜色缓冲可以有多个。
+事实上，一个帧缓冲最多绑定 $32$ 个颜色缓冲，编号从 $0$ 到 $31$，
+指定第 $i$ 个绑定点可以直接引用宏常量 GL\_COLOR\_ATTACHMENTi，
+也可以通过 GL\_COLOR\_ATTACHMENT0 + i 的方式计算得到。
+
+在将颜色缓冲绑定到绑定点后，还需要用 glDrawBuffers 函数将绑定点对应到颜色输出通道，
+以与片段着色器的输出对接。
+之前的情况中，由于窗口只包含一个颜色缓冲，故未对片段着色器的输出进行过多修饰。
+在多个颜色缓冲的情况下，
+片段着色器的输出变量同样可以用 layout (location = $X$) 的方式修饰，以对应不同输出通道的颜色缓冲。
+其中 $X$ 即对应了第 $X$ 个通道，即 color\_attachments 数组中第 $X$ 个变量对应的绑定点。
+
+片段着色器中的输出变量完整定义方式如下：
+\begin{lstlisting}
+layout (location = 3) vec4 color3;
+\end{lstlisting}
+
+同一帧缓冲中的缓冲纹理大小不必相同，
+实际的绘制区域是由 glViewport 函数指定的。
+如果绘制过程中出现了纹理越界的情况，则对应数据会被直接丢弃，
+因此，不必过分担心纹理大小对齐的问题。
 
 \subsubsection{混合}
 
+在之前的样例中，片段着色器输出的第四维信息一直没有作用，
+这是因为没有开启 OpenGL 的混合功能。
+混合技术可以根据新绘制的片段颜色信息与目标缓冲中已经保存的颜色信息进行计算，
+得到新的颜色值并保存在目标缓冲中。
+这种技术通常被用于实现半透明效果。
+
+调用如下代码启用混合技术。
+
+\begin{lstlisting}
+glEnable(GL_BLEND);
+\end{lstlisting}
+
+在默认的混合模式下，
+若一个新绘制片段的颜色值为 $\left(r_s, g_s, b_s, a_s\right)$，
+目标位置已有的颜色值为 $\left(r_d, g_d, b_d, a_d\right)$。
+则新的颜色值为 $$\left(\begin{matrix}
+    r\\g\\b\\a
+\end{matrix}\right)=\left(\begin{matrix}
+    r_s\\g_s\\b_s\\a_s
+\end{matrix}\right)\times a_s+\left(\begin{matrix}
+    r_d\\g_d\\b_d\\a_d
+\end{matrix}\right)\times(1.0-a_s)$$。
+
+可以通过 glBlendFunc 函数修改混合方式以实现不同效果，
+具体细节可以通过 docs.gl 网站查询获得。
+
+\subsubsection{面剔除}
+
+在光栅化渲染管线中，
+渲染的效率往往是和绘制的片段数正相关的，
+因此，省去不必要的片段计算可以提高渲染的效率。
+
+对于大多数三维物体而言，它们的几何表示都是封闭的，
+这时，不面向观察者的面最终一定不会被绘制出来。
+比如一个不透明球体，
+其面向观察者的一半有必要进行绘制，
+其背向观察者的一面则一定会被面向观察者一面遮挡，故没有必要进行绘制。
+
+面剔除技术可以在三角形进入光栅化阶段之前，
+根据三角形朝向进行筛选，将背向观察者的三角形全部剔除，
+从而达到节约计算资源的目的。
+判断正反向的根据是三角形三个顶点在变换到屏幕空间后的环绕方向，
+OpenGL 认为顺时针环绕的三角形是正向的，逆时针环绕的三角形是反向的。
+在开启面剔除后，默认剔除反向的三角形。
+
+开启面剔除的代码如下：
+
+\begin{lstlisting}
+glEnable(GL_CULL_FACE);
+\end{lstlisting}
+
+修改剔除朝向为正向的代码如下：
+
+\begin{lstlisting}
+glCullFace(GL_FRONT);
+\end{lstlisting}
+
+如果希望改回反向剔除，则可调用：
+
+\begin{lstlisting}
+glCullFace(GL_BACK);
+\end{lstlisting}
+
+
 \subsubsection{更多 GLSL 语法}
+
+在 GLSL 中，获取一个向量的分量除了可以通过 vec[i] 的方式调用外，
+还可以通过 vec.x, vec.y, vec.z, vec.w 的方式分别访问向量的四个分量，
+通过 vec.r, vec.g, vec.b, vec.a 也可以实现同样的效果。
+这种字母表示法除了可以获取一个分量外，
+还可以通过 vec.zxy 或者 vec.bgr 的方式将其若干个分量重新组合成一个新的分量返回。
+
+在组合新的向量时，也可以用如下方式，将不同维数的向量组合为新的向量，
+只需保证参数维数之和等于新的向量维数即可。
+
+\begin{lstlisting}
+/* 以下形式的语法都是合法的 */
+vec4 v0 = vec4(1.0, 2.0, 3.0, 4.0), v1 = vec4(4.0, 3.0, 2.0, 1.0), vec;
+vec = vec4(v1.xzy, v0.x);
+vec = vec4(v0.y, v1.xy, 1.0);
+vec = vec4(4.0, vec3(3.0, v0.wx));
+\end{lstlisting}
+
+在 GLSL 中还有许多内建函数，
+如常用的数学函数 sin, cos, tan, asin, acos, atan, radians, degrees, pow, exp, log, exp2, log2, sqrt 等；
+常用的向量函数 length, distance, normalize, dot, cross 等；
+常用的矩阵函数 determinant, transpose, inverse 等。
+GLSL 内建函数同样支持在 docs.gl 查询，在此不再一一说明。
+
+根据前文的内容，顶点着色器使用了内建变量 gl\_Position 向后续光栅化流程指定变换后的顶点坐标。
+GLSL 还拥有许多其他内建变量，这些变量有些是可写的，有些则是只读的。
+例如，gl\_PointSize 用于指定绘制点的大小，
+gl\_FrontFacing 用于获取一个片段是否是正向的，
+gl\_FragCoord 用于获取片段在屏幕空间的坐标，
+gl\_FragDepth 用于获取片段的深度值等。
+所有的内建变量也支持在 docs.gl 查询，不再一一说明。
 
 \subsection{光照}
 
@@ -2259,14 +2418,160 @@ float specular_reflect_model(vec3 vIn, vec3 vNorm, vec3 vOut)
 
 \subsubsection{绘制阴影}
 
-现在，虽然已经成功实现了光照，
-但效果还不能让人完全满意，
-因为还缺少光照系统中一个重要的组成部分：阴影。
+上一小节中，实现了光照效果后绘制出的图片的内容已经十分丰富了。
+但是，物体在光照条件下没有产生阴影，使得画面中的物体看上去有些“漂浮感”。
+然而，在光栅化管线中绘制阴影不是一件十分容易的事，
+因为阴影是由物体遮挡光源发出的光线形成的，
+判断物体上一点与光源的连线上是否存在遮挡物需要涉及大量的几何计算。
+光栅化管线恰恰是为了避免这种计算而设计的。
+因此，想要实现阴影效果需要一些取巧的方法。
 
-绘制
+在图形学研究早期，学术界提出了很多种阴影渲染的方法，
+但在经过大量实际应用的筛选后，
+绝大多数应用都选择了阴影映射算法。
+阴影映射算法的核心思想非常简单且直观，
+同时，其算法流程完美地复用了光栅化管线功能，
+而不用引入额外的处理流程。这些优点使得它在众多阴影算法的角逐中胜出。
 
+阴影映射算法的核心思想是：
+“光源能够照射到的部分，和处在光源出发点所能“看到”的部分本质相同。”
+具体地，回忆下在正常的渲染管线中用于处理物体之间遮挡关系的深度缓冲。
+深度缓冲可以用来测量一个物体在观察者视角下有没有被遮挡，
+同样的，它也可以用于测量一个物体在光源视角下有没有被遮挡。
 
+根据以上核心思想，可以得到阴影映射算法的流程：
+首先，绘制一张在光源视角下的深度缓冲图像，称作阴影贴图，如图 \ref{fig-gl:shadow-map} 所示，
+然后，在正常绘制图像时，对于每个绘制的片段，
+根据阴影贴图判断其所处位置在光源视角下是否被遮挡，
+如没有被遮挡，则计算光源对该片段的光照贡献，否则贡献为 $0$。
 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{imgs/sec 7.2/shadow_map.png}
+    \caption{阴影贴图（与深度缓冲本质相同）}
+    \label{fig-gl:shadow-map}
+\end{figure}
+
+在绘制光源视角的深度缓冲时，需要用到基于帧缓冲的离屏渲染，并关闭帧缓冲对象的色彩通道，代码如下：
+\begin{lstlisting}
+glCreateFramebuffers(1, &shadow_map_framebuffer_object);
+glBindFramebuffer(GL_FRAMEBUFFER, shadow_map_framebuffer_object);
+glFramebufferTexture2D( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+GL_TEXTURE_2D, shadow_map_object, 0);
+glDrawBuffer(GL_NONE);
+glReadBuffer(GL_NONE);
+glBindFramebuffer(GL_FRAMEBUFFER, 0);
+\end{lstlisting}
+
+同时，需要为绘制阴影贴图编写一套简单的着色器。
+
+阴影贴图顶点着色器（只需要坐标变换）：
+\begin{lstlisting}
+#version 450 core
+layout (location = 0) in vec3 vs_pos;
+uniform mat4 mat_trans;
+void main()
+{
+    gl_Position = mat_trans*vec4(vs_pos, 1.0);
+}
+\end{lstlisting}
+
+阴影贴图片段着色器（不需要绘制颜色，因此置空即可）：
+\begin{lstlisting}
+#version 450 core
+void main() {}
+\end{lstlisting}
+
+在最终图像的绘制中，需要在片段着色器中利用如下函数根据阴影贴图计算光源贡献：
+
+\begin{lstlisting}
+uniform sampler2D shadow_map;
+uniform mat4 mat_shadow_trans;
+float CheckLightVisibility(vec4 pos)
+{
+    /* 光源坐标变换 */
+    pos = mat_shadow_trans*pos;
+    /* 从 [-1, 1] 映射到 [0, 1] */
+    pos = (pos + vec4(1.0, 1.0, 1.0, 0.0)) * 0.5;
+    return (pos.z <= texture(shadow_map, pos.xy).z) ? 1.0 : 0.0;
+}
+\end{lstlisting}
+
+以上代码中，阴影贴图着色器中的 mat\_trans 与最终画面片段着色器中的 mat\_shadow\_trans 相同。
+此外需要注意，
+因为 NDC 空间坐标范围为 $[-1, 1]$，
+而纹理采样坐标范围和记录值的范围为 $[0, 1]$，
+需要手动进行映射以采样到正确的深度值。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{imgs/sec 7.1/self-occulusion.png}
+    \caption{带有阴影的图像（但似乎有些不对）}
+    \label{fig-gl:self-occulusion}
+\end{figure}
+
+在完成上述代码的实现后，可以获得如图 \ref{fig-gl:self-occulusion} 所示的效果。
+从图中可以看到，图像中的小球已经可以正确地投射出阴影了，但物体上出现了奇怪的花纹。
+这是因为，阴影贴图的精度有限，本应被照亮的一块区域对应到了阴影贴图的同一像素上。
+由于像素只能记录一个深度值，同一区域内部分位置离光源稍远，于是被认为处在阴影区域内，
+造成了“自遮挡”现象。
+解决此类问题最为简单的方法是将阴影贴图记录的深度稍稍放大一点，以扩大对邻近区域深度变化的容忍度。
+在代码上体现为，
+将上文判断光源可见性的函数中采样到的阴影贴图深度乘以
+$(1+\epsilon)$（此处取$\epsilon=0.001$）后，再与片段深度做比较：
+
+\begin{lstlisting}
+return (pos.z <= texture(shadow_map, pos.xy).z * 1.001) ? 1.0 : 0.0;
+\end{lstlisting}
+
+这种解决方案并不完美，
+例如：在光源方向与物体法向夹角过大时问题依旧会存在；
+以及引入深度容忍度会使本应处于阴影中的区域被照亮，
+从而产生“漏光”或者“漂浮”现象。
+这些问题并没有完美的解决方案，还需要根据实际情况进行具体分析。
+
+由阴影贴图精度不够导致的问题还有阴影锯齿现象，如 \ref{fig-gl:shadow-non-aa} 所示。
+通过提高阴影贴图分辨率可以一定程度上缓解问题，
+另一种比较有效的手段是，
+在计算光源可见性时，
+对阴影贴图对应点周围多个像素进行采样，
+计算结果的平均值，
+从而达到柔化阴影边缘的效果，
+如图 \ref{fig-gl:shadow-with-aa} 所示。
+两种方法中，前者会造成更多的显存负担，
+后者会造成更多的计算负担。
+一般情况下，后者生成的图像观感更好。
+
+\begin{figure}[htbp]
+    \centering
+    \subfigure[阴影锯齿]
+    {
+        \begin{minipage}[t]{0.4\linewidth}
+        \centering
+        \includegraphics[height=2in]{imgs/sec 7.1/part-lighting-no-aa.png}
+        \label{fig-gl:shadow-non-aa}
+        \end{minipage}
+    }
+    \subfigure[经过柔化处理的阴影]
+    {
+        \begin{minipage}[t]{0.4\linewidth}
+        \centering
+        \includegraphics[height=2in]{imgs/sec 7.1/part-lighting-with-shadow.png}
+        \label{fig-gl:shadow-with-aa}
+        \end{minipage}
+    }
+    \caption{阴影抗锯齿前后对比}
+    \label{fig-gl:shadow-aa-compare}
+\end{figure}
+
+在应用了上述优化方法后，最终可以得到如图 \ref{fig-gl:lighting-with-shadow} 所示的效果。
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{imgs/sec 7.1/lighting-with-shadow.png}
+    \caption{带有阴影的效果图}
+    \label{fig-gl:lighting-with-shadow}
+\end{figure}
 
 \subsection{更多学习资源}
 

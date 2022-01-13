@@ -150,6 +150,7 @@ struct Vertex
     Vec3f pos;
     Vec3f normal;
     Vec3f color;
+    float flag;
 };
 
 struct TriInd
@@ -178,8 +179,10 @@ uint32_t shader_program_object;
 uint32_t depth_map_object;
 uint32_t depth_map_framebuffer_object;
 uint32_t depth_shader_program_object;
-const uint32_t SHADOW_WIDTH = 2048;
-const uint32_t SHADOW_HEIGHT = 2048;
+const uint32_t SHADOW_WIDTH = 4096;
+const uint32_t SHADOW_HEIGHT = 4096;
+
+uint32_t tex_shader_program_object;
 
 uint32_t CompileGLSLShaderFromFile(
     const char* shader_file_path,
@@ -296,6 +299,13 @@ void InitAssets()
     glDeleteShader(vertex_shader_object);
     glDeleteShader(fragment_shader_object);
 
+    vertex_shader_object = CompileGLSLShaderFromFile("tex_vertex_shader.glsl", GL_VERTEX_SHADER);
+    fragment_shader_object = CompileGLSLShaderFromFile("tex_fragment_shader.glsl", GL_FRAGMENT_SHADER);
+    tex_shader_program_object = LinkProgram(vertex_shader_object, fragment_shader_object);
+    glDeleteShader(vertex_shader_object);
+    glDeleteShader(fragment_shader_object);
+
+
     glCreateTextures(GL_TEXTURE_2D, 1, &depth_map_object);
     glBindTexture(GL_TEXTURE_2D, depth_map_object);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -326,24 +336,28 @@ void LoadTriangle(Vec3f v0, Vec3f v1, Vec3f v2, Vec3f color)
     vertex_buffer[cnt_vertex].pos = v0;
     vertex_buffer[cnt_vertex].normal = normal;
     vertex_buffer[cnt_vertex].color = color;
+    vertex_buffer[cnt_vertex].flag = 0;
     vertex_buffer[cnt_vertex + 1].pos = v1;
     vertex_buffer[cnt_vertex + 1].normal = normal;
     vertex_buffer[cnt_vertex + 1].color = color;
+    vertex_buffer[cnt_vertex + 1].flag = 0;
     vertex_buffer[cnt_vertex + 2].pos = v2;
     vertex_buffer[cnt_vertex + 2].normal = normal;
     vertex_buffer[cnt_vertex + 2].color = color;
+    vertex_buffer[cnt_vertex + 2].flag = 0;
     index_buffer[cnt_index] = TriInd(cnt_vertex, cnt_vertex + 2, cnt_vertex + 1);
     cnt_vertex += 3;
     cnt_index += 1;
 }
 
-void LoadSphere(Vec3f origin, float radius, Vec3f color)
+void LoadSphere(Vec3f origin, float radius, Vec3f color, float flag = 0.0)
 {
     for (int i = 0; i < BALL_ACCURACY*(BALL_ACCURACY - 1)+2; i++)
     {
         vertex_buffer[i+cnt_vertex].pos = sphere_vertices[i] * radius + origin;
         vertex_buffer[i+cnt_vertex].normal = sphere_vertices[i];
         vertex_buffer[i+cnt_vertex].color = color;
+        vertex_buffer[i+cnt_vertex].flag = flag;
     }
     for (int i = 0; i < BALL_ACCURACY * (BALL_ACCURACY - 1) *2; i++)
         index_buffer[i + cnt_index] = sphere_indices[i] + cnt_vertex;
@@ -378,6 +392,18 @@ void InitBalls()
                 balls_velocity[i*16 + j*4 + k] = Vec3f(d(rd), d(rd), d(rd));
                 balls_color[i*16 + j*4 + k] = Vec3f(d_color(rd), d_color(rd), d_color(rd));
             }
+    for (int i = 0; i < 8; i++)
+    {
+        balls_color[(i << 3) | i] = balls_color[(i << 3) | i] * (1.0 / 
+        fmaxf(
+            fmaxf(
+                balls_color[(i << 3) | i].y,
+                balls_color[(i << 3) | i].z
+            ),
+            balls_color[(i << 3) | i].x
+        )
+        );
+    }
 }
 
 void BallCollision(int i, int j)
@@ -424,6 +450,13 @@ void LoadScene()
     LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
     LoadTriangle(Vec3f(-5.0, 5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
 
+    LoadTriangle(Vec3f(-5.0, -5.0, -5.0), Vec3f(5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, 5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(5.0, -5.0, -5.0), Vec3f(5.0, -5.0, 5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(0.7, 0.7, 1.0));
+    LoadTriangle(Vec3f(-5.1, -5.0, 5.1), Vec3f(5.0, 5.0, 5.1), Vec3f(-5.1, 5.0, 5.1), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(5.0, -5.0, 5.1), Vec3f(5.0, 5.0, 5.1), Vec3f(-5.1, -5.0, 5.1), Vec3f(0.7, 1.0, 0.7));
+    LoadTriangle(Vec3f(-5.1, -5.0, -5.0), Vec3f(-5.1, 5.0, 5.1), Vec3f(-5.1, 5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+    LoadTriangle(Vec3f(-5.1, -5.0, 5.1), Vec3f(-5.1, 5.0, 5.1), Vec3f(-5.1, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
+
     LoadTriangle(Vec3f(-5.0, 5.0, -5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(-5.0, 5.0, 5.0), Vec3f(0.7, 0.7, 1.0));
     LoadTriangle(Vec3f(5.0, 5.0, -5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(0.7, 0.7, 1.0));
     LoadTriangle(Vec3f(5.0, 5.0, -5.0), Vec3f(-5.0, 5.0, -5.0), Vec3f(-5.0, -5.0, -5.0), Vec3f(0.7, 1.0, 0.7));
@@ -432,7 +465,7 @@ void LoadScene()
     LoadTriangle(Vec3f(5.0, -5.0, 5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
 
     for (int i = 0; i < 64; i++)
-        LoadSphere(balls_pos[i], ball_radius, balls_color[i]);
+        LoadSphere(balls_pos[i], ball_radius, balls_color[i], ((i & 7) == (i >> 3)) ? 1.0f : 0.0);
     
     glNamedBufferSubData(vertex_buffer_object, 0, sizeof(Vertex) * cnt_vertex, vertex_buffer);
     glNamedBufferSubData(index_buffer_object, 0, sizeof(TriInd) * cnt_index, index_buffer);
@@ -481,12 +514,21 @@ int main(void)
 
     InitAssets();
 
-    int32_t mat_proj_location, mat_trans_location, v_light_direct_location, depth_mat_trans_location, mat_depth_location;
+    int32_t 
+    mat_proj_location, 
+    mat_trans_location, 
+    v_light_direct_location, 
+    depth_mat_trans_location, 
+    mat_depth_location,
+    lights_pos_location,
+    lights_brightness_location;
     mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
     mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
     v_light_direct_location = glGetUniformLocation(shader_program_object, "v_light_direct");
     depth_mat_trans_location = glGetUniformLocation(depth_shader_program_object, "mat_trans");
     mat_depth_location = glGetUniformLocation(shader_program_object, "mat_depth");
+    lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
+    lights_brightness_location = glGetUniformLocation(shader_program_object, "lights_brightness");
 
     glfwSwapInterval(1);
 
@@ -506,6 +548,12 @@ int main(void)
 
     Vec3f v_light_direct = Vec3f(-3.0, -1.0, 2.0);
 
+    Vec3f lights_pos[8];
+    Vec3f lights_brightness[8];
+
+    for (int i = 0; i < 1000; i++)
+        UpdateBalls(0.002);
+
     /* 消息循环 */
     while (!glfwWindowShouldClose(window))
     {
@@ -519,8 +567,8 @@ int main(void)
         Matrix depth_map_mat_trans = Matrix(
             0.12, 0.0, 0.0, 0.0,
             0.0, 0.12, 0.0, 0.0,
-            0.0, 0.0, 1.0 / 99.0, 0.0,
-            0.0, 0.0, -1.0 / 99.0, 1.0
+            0.0, 0.0, 1.0 / 25.0, 0.0,
+            0.0, 0.0, -1.0, 1.0
         ) * fake_inverse(LookAtMatrix(v_light_direct * -10.0, Vec3f(0.0, 0.0, 0.0)));
         glProgramUniformMatrix4fv(depth_shader_program_object, depth_mat_trans_location, 1, false, (float*)&depth_map_mat_trans);
         glProgramUniformMatrix4fv(shader_program_object, mat_depth_location, 1, false, (float*)&depth_map_mat_trans);
@@ -528,6 +576,15 @@ int main(void)
 
         /* 加载场景 */
         LoadScene();
+        for (int i = 0; i < 8; i++)
+        {
+            int ball_index = ((i << 3) | i);
+            lights_pos[i] = balls_pos[ball_index];
+            lights_brightness[i] = balls_color[ball_index];
+        }
+
+        glProgramUniform3fv(shader_program_object, lights_brightness_location, 8, (float*)lights_brightness);
+        glProgramUniform3fv(shader_program_object, lights_pos_location, 8, (float*)lights_pos);
 
 
         /* 渲染阴影图 */
@@ -538,7 +595,7 @@ int main(void)
         glUseProgram(depth_shader_program_object);
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, (void*)0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
         glEnableVertexAttribArray(0);
         glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
         glDisableVertexAttribArray(0);
@@ -556,12 +613,14 @@ int main(void)
         glUseProgram(shader_program_object);
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, (void*)0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, false, 36, (void*)12);
-        glVertexAttribPointer(2, 3, GL_FLOAT, false, 36, (void*)24);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, false, 40, (void*)12);
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, 40, (void*)24);
+        glVertexAttribPointer(3, 1, GL_FLOAT, false, 40, (void*)36);
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
         glEnableVertexAttribArray(2);
+        glEnableVertexAttribArray(3);
 
         Matrix mat_proj, mat_trans;
         mat_proj = ProjectionMatrix(1.0f, 100.0f, (float)width / (float)height, pi / 3.0);
@@ -577,6 +636,19 @@ int main(void)
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
         glDisableVertexAttribArray(2);
+        glDisableVertexAttribArray(3);
+
+        /*glDisable(GL_CULL_FACE);
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(tex_shader_program_object);
+        float tex_vertices[] = { -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f };
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tex_vertices), tex_vertices);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, 8, (void*)0);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);//*/
 
         /* 交换缓冲 */
         glfwSwapBuffers(window);
