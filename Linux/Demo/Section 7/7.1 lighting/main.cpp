@@ -638,6 +638,18 @@ int main(void)
         glDisableVertexAttribArray(2);
         glDisableVertexAttribArray(3);
 
+        /*glDisable(GL_CULL_FACE);
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(tex_shader_program_object);
+        float tex_vertices[] = { -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f };
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tex_vertices), tex_vertices);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, 8, (void*)0);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);//*/
+
         /* 交换缓冲 */
         glfwSwapBuffers(window);
 
@@ -656,8 +668,8 @@ int main(void)
         if (glfwGetKey(window, GLFW_KEY_S)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
         if (glfwGetKey(window, GLFW_KEY_D)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
         if (glfwGetKey(window, GLFW_KEY_A)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_SPACE)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_R)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_F)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
 
 
         {
