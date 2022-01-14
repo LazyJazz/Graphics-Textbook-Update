@@ -13,7 +13,7 @@
 /* 球模型精细度 [4, 100) */
 const int BALL_ACCURACY = 40;
 /* 球的半径 (0.0, 1.0] */
-const float ball_radius = 1.0;
+const float ball_radius = 0.8;
 /* 弹性系数 (0.0, 1.0) */
 const float elastic = 0.8;
 /* 阴影贴图宽度 */
@@ -194,8 +194,6 @@ uint32_t depth_map_object;
 uint32_t depth_map_framebuffer_object;
 uint32_t depth_shader_program_object;
 
-uint32_t tex_shader_program_object;
-
 uint32_t CompileGLSLShaderFromFile(
     const char* shader_file_path,
     uint32_t shader_type
@@ -310,13 +308,6 @@ void InitAssets()
     depth_shader_program_object = LinkProgram(vertex_shader_object, fragment_shader_object);
     glDeleteShader(vertex_shader_object);
     glDeleteShader(fragment_shader_object);
-
-    vertex_shader_object = CompileGLSLShaderFromFile("tex_vertex_shader.glsl", GL_VERTEX_SHADER);
-    fragment_shader_object = CompileGLSLShaderFromFile("tex_fragment_shader.glsl", GL_FRAGMENT_SHADER);
-    tex_shader_program_object = LinkProgram(vertex_shader_object, fragment_shader_object);
-    glDeleteShader(vertex_shader_object);
-    glDeleteShader(fragment_shader_object);
-
 
     glCreateTextures(GL_TEXTURE_2D, 1, &depth_map_object);
     glBindTexture(GL_TEXTURE_2D, depth_map_object);
@@ -477,13 +468,6 @@ void LoadScene()
     glNamedBufferSubData(index_buffer_object, 0, sizeof(TriInd) * cnt_index, index_buffer);
 }
 
-void Print(Matrix mat)
-{
-    for (int i = 0; i < 4; i++)
-        for (int j = 0; j < 4; j++)
-            printf("%.3f%c", mat.m[i][j], (j == 3) ? '\n' : '\t');
-}
-
 int main(void)
 {
     GLFWwindow* window;
@@ -536,7 +520,7 @@ int main(void)
     lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
     lights_brightness_location = glGetUniformLocation(shader_program_object, "lights_brightness");
 
-    glfwSwapInterval(1);
+    glfwSwapInterval(0);
 
     Matrix CameraRotation = RotationMatrix(0.19*pi, 0.225*pi, 0.0);
     Vec3f CameraTranslation = Vec3f(9.0, 9.0f, -11.0f);
@@ -639,18 +623,6 @@ int main(void)
         glDisableVertexAttribArray(1);
         glDisableVertexAttribArray(2);
         glDisableVertexAttribArray(3);
-
-        /*glDisable(GL_CULL_FACE);
-        glDisable(GL_DEPTH_TEST);
-        glUseProgram(tex_shader_program_object);
-        float tex_vertices[] = { -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f };
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(tex_vertices), tex_vertices);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, false, 8, (void*)0);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-        glDisableVertexAttribArray(0);
-        glEnable(GL_CULL_FACE);
-        glEnable(GL_DEPTH_TEST);//*/
 
         /* 交换缓冲 */
         glfwSwapBuffers(window);

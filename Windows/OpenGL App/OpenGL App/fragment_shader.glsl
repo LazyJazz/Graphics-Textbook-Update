@@ -4,7 +4,7 @@
 /*          可调参数              */
 
 /* 软阴影采样级别 [0, 10] */
-const int shadow_sample = 8;
+const int shadow_sample = 3;
 /* 点光源亮度系数 [0, inf) */
 const float point_light_brightness = 1.0;
 /* 点光源衰减系数 */
