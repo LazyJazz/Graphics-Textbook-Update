@@ -97,10 +97,18 @@ void main()
         lighting +=
         CheckLightVisibility(fs_pos) * 
         0.9 *
-        parallel_light(normalize(mat_trans*vec4(v_light_direct, 0.0)).xyz, vec3(1.0, 1.0, 1.0), mat_trans*fs_pos, normalize(mat_trans*fs_norm));
+        parallel_light(
+            normalize(mat_trans*vec4(v_light_direct, 0.0)).xyz, 
+            vec3(1.0, 1.0, 1.0),
+            mat_trans*fs_pos, 
+            normalize(mat_trans*fs_norm));
 
         for (int i = 0; i < 8; i++)
-            lighting += 0.9 * point_light((mat_trans*vec4(lights_pos[i], 1.0)).xyz, lights_brightness[i], mat_trans*fs_pos, normalize(mat_trans*fs_norm));
+            lighting += 0.9 * point_light(
+                (mat_trans*vec4(lights_pos[i], 1.0)).xyz, 
+                lights_brightness[i], 
+                mat_trans*fs_pos, 
+                normalize(mat_trans*fs_norm));
 
         vec3 color = fs_color;
         

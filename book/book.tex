@@ -2178,11 +2178,11 @@ vec3 lighting(vec3 frag_pos, vec3 frag_norm, vec3 frag_color)
     /* 计算点光源贡献 */
     reflected_light += point_light(frag_pos, frag_norm);
     /* 计算平行光源贡献 */
-    reflected_light += parrallel_light(frag_pos, frag_norm);
+    reflected_light += parallel_light(frag_pos, frag_norm);
     /* 计算环境光贡献 */
     reflected_light += ambient_light(frag_pos, frag_norm);
     /* 最终亮度还需要乘以反射率，以表现物体的颜色 */
-    return frag_color * incoming_light;
+    return frag_color * reflected_light;
 }
 \end{lstlisting}
 
