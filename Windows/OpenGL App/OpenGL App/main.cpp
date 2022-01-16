@@ -7,22 +7,36 @@
 #include <thread>
 #include <random>
 
-/**********************************/
-/*          可调参数              */
+/************************************/
+/*             可调参数              */
 
 /* 球模型精细度 [4, 100) */
 const int BALL_ACCURACY = 40;
 /* 球的半径 (0.0, 1.0] */
 const float ball_radius = 0.8;
 /* 弹性系数 (0.0, 1.0) */
-const float elastic = 0.8;
+const float elastic = 1.0;
 /* 阴影贴图宽度 */
 const uint32_t SHADOW_WIDTH = 4096;
 /* 阴影贴图高度 */
 const uint32_t SHADOW_HEIGHT = 4096;
+/* 初始化球参数随机种子 */
+const uint64_t RANDOM_SEED = 1949;
+/* 阴影柔化级别 [0, 10] */
+int shadow_sample = 3;
+/* 点光源亮度系数 [0, inf) */
+float point_light_brightness = 0.9;
+/* 点光源衰减系数 */
+float Kq = 1.0, Kp = 0.0, Kc = 1.0;
+/* 平行光源亮度 */
+float parallel_light_brightness[3] = { 0.9, 0.9, 0.9 };
+/* 环境光亮度 */
+float ambient_light_brightness[3] = { 0.1, 0.1, 0.1 };
+/* 更新速度系数 */
+float update_rate = 1.0;
 
-/*   片段着色器中还有一些可调参数   */
-/**********************************/
+/*                                  */
+/************************************/
 
 const double pi = 3.14159265358979323846264338327950288419716939937510;
 
@@ -59,7 +73,335 @@ struct Matrix
     }
 };
 
-Matrix ProjectionMatrix(float Near, float Far, float aspect, float FOV = 0.5*pi)
+Matrix ProjectionMatrix(float Near, float Far, float aspect, float FOV = 0.5 * pi);
+
+Matrix TranslateMatrix(float x, float y, float z);
+
+Matrix RotationMatrix(float pitch, float yaw, float roll);
+
+struct Vec3f
+{
+    float x, y, z;
+    Vec3f() { x = y = z = 0.0f; }
+    Vec3f(float _x, float _y, float _z) { x = _x; y = _y; z = _z; }
+    friend Vec3f operator * (const Matrix& mat, const Vec3f& vec)
+    {
+        return Vec3f(
+            vec.x * mat.m[0][0] + vec.y * mat.m[1][0] + vec.z * mat.m[2][0],
+            vec.x * mat.m[0][1] + vec.y * mat.m[1][1] + vec.z * mat.m[2][1],
+            vec.x * mat.m[0][2] + vec.y * mat.m[1][2] + vec.z * mat.m[2][2]
+        );
+    }
+    friend Vec3f operator * (const Vec3f& vec, const Matrix& mat)
+    {
+        return Vec3f(
+            vec.x * mat.m[0][0] + vec.y * mat.m[0][1] + vec.z * mat.m[0][2],
+            vec.x * mat.m[1][0] + vec.y * mat.m[1][1] + vec.z * mat.m[1][2],
+            vec.x * mat.m[2][0] + vec.y * mat.m[2][1] + vec.z * mat.m[2][2]
+        );
+    }
+    Vec3f operator * (const float& scale) { return Vec3f(x * scale, y * scale, z * scale); }
+    Vec3f operator + (const Vec3f& b) { return Vec3f(x + b.x, y + b.y, z + b.z); }
+    Vec3f operator - (const Vec3f& b) { return Vec3f(x - b.x, y - b.y, z - b.z); }
+};
+
+float dot(Vec3f va, Vec3f vb) { return va.x * vb.x + va.y * vb.y + va.z * vb.z; }
+Vec3f cross(Vec3f va, Vec3f vb) { return Vec3f(va.y * vb.z - va.z * vb.y, va.z * vb.x - va.x * vb.z, va.x * vb.y - va.y * vb.x); }
+float length(Vec3f v) { return sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
+Vec3f normalize(Vec3f v) { return v * (1.0f / length(v)); }
+
+Matrix LookAtMatrix(Vec3f stayAt, Vec3f lookAt);
+
+Matrix fake_inverse(Matrix mat);
+
+struct Vertex
+{
+    Vec3f pos;
+    Vec3f normal;
+    Vec3f color;
+    int32_t flag;
+};
+
+struct TriInd
+{
+    uint32_t i0, i1, i2;
+    TriInd() { i0 = i1 = i2 = 0; }
+    TriInd(uint32_t _i0, uint32_t _i1, uint32_t _i2) { i0 = _i0; i1 = _i1; i2 = _i2; }
+    TriInd operator + (const uint32_t offset) { return TriInd(i0 + offset, i1 + offset, i2 + offset); }
+};
+
+Vec3f sphere_vertices[BALL_ACCURACY * (BALL_ACCURACY - 1) + 2];
+TriInd sphere_indices[(BALL_ACCURACY - 1) * BALL_ACCURACY * 2];
+
+Vertex vertex_buffer[(BALL_ACCURACY * (BALL_ACCURACY - 1) + 2) * 64 + 128];
+TriInd index_buffer[(BALL_ACCURACY - 1) * BALL_ACCURACY * 2 * 64 + 128];
+uint32_t cnt_vertex, cnt_index;
+
+uint32_t vertex_buffer_object;
+uint32_t index_buffer_object;
+
+uint32_t shader_program_object;
+
+uint32_t depth_map_object;
+uint32_t depth_map_framebuffer_object;
+uint32_t depth_shader_program_object;
+
+uint32_t CompileGLSLShaderFromFile(
+    const char* shader_file_path,
+    uint32_t shader_type
+);
+
+uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object);
+
+/* 这个函数用于初始化渲染过程中用到的资源 */
+void InitAssets();
+
+void ResetScene();
+
+void LoadTriangle(Vec3f v0, Vec3f v1, Vec3f v2, Vec3f color);
+
+void LoadSphere(Vec3f origin, float radius, Vec3f color, int flag = 0);
+
+Vec3f balls_pos[64];
+Vec3f balls_velocity[64];
+Vec3f balls_color[64];
+
+void InitBalls();
+
+void BallCollision(int i, int j);
+
+void UpdateBalls(float time_step);
+
+void LoadScene();
+
+int main(void)
+{
+    GLFWwindow* window;
+
+    /* 初始化 GLFW 库 */
+    if (!glfwInit())
+        return -1;
+
+    /* 创建窗口 */
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    window = glfwCreateWindow(768, 768, "Lighting", NULL, NULL);
+    if (!window)
+    {
+        glfwTerminate();
+        return -1;
+    }
+
+    /* 将窗口设置为当前上下文 */
+    glfwMakeContextCurrent(window);
+
+    /* 初始化 GLAD 库，在这一步之后才能调用 glXXX 函数 */
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        glfwTerminate();
+        return -1;
+    }
+
+    /* 显示设备信息以及 GL 版本 */
+    std::cout << "GPU:         " << glGetString(GL_RENDERER) << std::endl;
+    std::cout << "GPU Vendor:  " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "GL Version:  " << glGetString(GL_VERSION) << std::endl;
+
+    /* 调用初始化函数 */
+
+    InitAssets();
+
+    int32_t
+        mat_proj_location,
+        mat_trans_location,
+        parallel_light_direction_location,
+        depth_mat_trans_location,
+        mat_depth_location,
+        lights_pos_location,
+        lights_brightness_location;
+    mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
+    mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
+    parallel_light_direction_location = glGetUniformLocation(shader_program_object, "parallel_light_direction");
+    depth_mat_trans_location = glGetUniformLocation(depth_shader_program_object, "mat_trans");
+    mat_depth_location = glGetUniformLocation(shader_program_object, "mat_depth");
+    lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
+    lights_brightness_location = glGetUniformLocation(shader_program_object, "lights_brightness");
+
+    glfwSwapInterval(0);
+
+    Matrix CameraRotation = RotationMatrix(0.19 * pi, 0.225 * pi, 0.0);
+    Vec3f CameraTranslation = Vec3f(9.0, 9.0f, -11.0f);
+
+    InitBalls();
+
+    double camera_pitch = 0.19 * pi, camera_yaw = 0.225 * pi;
+    double last_x = 0.0, last_y = 0.0;
+    int last_click = 0;
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+
+    std::chrono::steady_clock::time_point tp = std::chrono::steady_clock::now(), start_tp = tp;
+    uint64_t last_ms = 0;
+
+    Vec3f parallel_light_direction = Vec3f(-3.0, -1.0, 2.0);
+
+    Vec3f lights_pos[8];
+    Vec3f lights_brightness[8];
+
+    /* 消息循环 */
+    while (!glfwWindowShouldClose(window))
+    {
+        /* 帧绘制用时统计 */
+        std::chrono::steady_clock::time_point this_tp = std::chrono::steady_clock::now();
+        uint64_t new_ms = (this_tp - start_tp) / std::chrono::milliseconds(1), time_passed_ms = new_ms - last_ms;
+        last_ms = new_ms;
+        tp = this_tp;
+
+        /* 更新光源方向 */
+        parallel_light_direction = RotationMatrix(0.0, 0.0003 * time_passed_ms * update_rate, 0.0) * parallel_light_direction;
+        Matrix depth_map_mat_trans = Matrix(
+            0.12, 0.0, 0.0, 0.0,
+            0.0, 0.12, 0.0, 0.0,
+            0.0, 0.0, 1.0 / 25.0, 0.0,
+            0.0, 0.0, -1.0, 1.0
+        ) * fake_inverse(LookAtMatrix(parallel_light_direction * -10.0, Vec3f(0.0, 0.0, 0.0)));
+        glProgramUniformMatrix4fv(depth_shader_program_object, depth_mat_trans_location, 1, false, (float*)&depth_map_mat_trans);
+        glProgramUniformMatrix4fv(shader_program_object, mat_depth_location, 1, false, (float*)&depth_map_mat_trans);
+        glProgramUniform3fv(shader_program_object, parallel_light_direction_location, 1, (float*)&parallel_light_direction);
+
+        /* 加载场景 */
+        LoadScene();
+        for (int i = 0; i < 8; i++)
+        {
+            int ball_index = ((i << 3) | i);
+            lights_pos[i] = balls_pos[ball_index];
+            lights_brightness[i] = balls_color[ball_index];
+        }
+
+        glProgramUniform3fv(shader_program_object, lights_brightness_location, 8, (float*)lights_brightness);
+        glProgramUniform3fv(shader_program_object, lights_pos_location, 8, (float*)lights_pos);
+
+
+        /* 渲染阴影图 */
+
+        glBindFramebuffer(GL_FRAMEBUFFER, depth_map_framebuffer_object);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glUseProgram(depth_shader_program_object);
+        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
+        glEnableVertexAttribArray(0);
+        glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
+        glDisableVertexAttribArray(0);
+
+        /* 渲染最终画面 */
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.0, 0.0, 0.0, 1.0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        int32_t width, height;
+        glfwGetWindowSize(window, &width, &height);
+        glViewport(0, 0, width, height);
+        glUseProgram(shader_program_object);
+        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, false, 40, (void*)12);
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, 40, (void*)24);
+        glVertexAttribIPointer(3, 1, GL_INT, 40, (void*)36);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+        glEnableVertexAttribArray(3);
+
+        Matrix mat_proj, mat_trans;
+        mat_proj = ProjectionMatrix(1.0f, 100.0f, (float)width / (float)height, pi / 3.0);
+        mat_trans = fake_inverse(
+            TranslateMatrix(CameraTranslation.x, CameraTranslation.y, CameraTranslation.z) * CameraRotation
+        );
+        glUniformMatrix4fv(mat_proj_location, 1, 0, (float*)&mat_proj);
+        glUniformMatrix4fv(mat_trans_location, 1, 0, (float*)&mat_trans);
+
+        glBindTexture(GL_TEXTURE_2D, depth_map_object);
+        glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
+
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
+        glDisableVertexAttribArray(3);
+
+        /* 交换缓冲 */
+        glfwSwapBuffers(window);
+
+        /* 处理窗口消息 */
+        glfwPollEvents();
+
+
+        /* 更新帧资源 */
+        for (int i = 0; i < time_passed_ms; i++)
+            UpdateBalls(0.001 * update_rate);
+
+
+        /* 处理输入 */
+        const float move_speed = 0.005 * time_passed_ms;
+        if (glfwGetKey(window, GLFW_KEY_W)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_S)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_D)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_A)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_R)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
+        if (glfwGetKey(window, GLFW_KEY_F)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
+
+
+        {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            int left_click = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+            if (left_click)
+            {
+                camera_pitch += (ypos - last_y) * 0.002;
+                camera_yaw -= (xpos - last_x) * 0.002;
+            }
+            last_x = xpos;
+            last_y = ypos;
+        }
+
+        CameraRotation = RotationMatrix(camera_pitch, camera_yaw, 0.0);
+    }
+
+    glfwTerminate();
+    return 0;
+}
+
+Matrix LookAtMatrix(Vec3f stayAt, Vec3f lookAt)
+{
+    Vec3f z = normalize(lookAt - stayAt), x = normalize(cross(Vec3f(0.0, 1.0, 0.0), z)), y = cross(z, x);
+    return Matrix(
+        x.x, x.y, x.z, 0.0,
+        y.x, y.y, y.z, 0.0,
+        z.x, z.y, z.z, 0.0,
+        stayAt.x, stayAt.y, stayAt.z, 1.0
+    );
+}
+
+
+Matrix fake_inverse(Matrix mat)
+{
+    Matrix res = Matrix(
+        mat.m[0][0], mat.m[1][0], mat.m[2][0], 0.0f,
+        mat.m[0][1], mat.m[1][1], mat.m[2][1], 0.0f,
+        mat.m[0][2], mat.m[1][2], mat.m[2][2], 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    );
+    Vec3f b = res * Vec3f(-mat.m[3][0], -mat.m[3][1], -mat.m[3][2]);
+    res.m[3][0] = b.x;
+    res.m[3][1] = b.y;
+    res.m[3][2] = b.z;
+    return res;
+}
+
+Matrix ProjectionMatrix(float Near, float Far, float aspect, float FOV)
 {
     float vertical_scale = tan(FOV * 0.5);
     return Matrix(
@@ -103,96 +445,6 @@ Matrix RotationMatrix(float pitch, float yaw, float roll)
             0.0, 0.0, 0.0, 1.0
         );
 }
-
-struct Vec3f
-{
-    float x, y, z;
-    Vec3f() { x = y = z = 0.0f; }
-    Vec3f(float _x, float _y, float _z) { x = _x; y = _y; z = _z; }
-    friend Vec3f operator * (const Matrix& mat, const Vec3f& vec)
-    {
-        return Vec3f(
-            vec.x * mat.m[0][0] + vec.y * mat.m[1][0] + vec.z * mat.m[2][0],
-            vec.x * mat.m[0][1] + vec.y * mat.m[1][1] + vec.z * mat.m[2][1],
-            vec.x * mat.m[0][2] + vec.y * mat.m[1][2] + vec.z * mat.m[2][2]
-        );
-    }
-    friend Vec3f operator * (const Vec3f& vec, const Matrix& mat)
-    {
-        return Vec3f(
-            vec.x * mat.m[0][0] + vec.y * mat.m[0][1] + vec.z * mat.m[0][2],
-            vec.x * mat.m[1][0] + vec.y * mat.m[1][1] + vec.z * mat.m[1][2],
-            vec.x * mat.m[2][0] + vec.y * mat.m[2][1] + vec.z * mat.m[2][2]
-        );
-    }
-    Vec3f operator * (const float & scale) { return Vec3f(x*scale, y*scale, z*scale); }
-    Vec3f operator + (const Vec3f & b) { return Vec3f(x+b.x, y+b.y, z+b.z); }
-    Vec3f operator - (const Vec3f & b) { return Vec3f(x-b.x, y-b.y, z-b.z); }
-};
-
-float dot(Vec3f va, Vec3f vb) { return va.x*vb.x + va.y*vb.y + va.z*vb.z; }
-Vec3f cross(Vec3f va, Vec3f vb) { return Vec3f(va.y*vb.z - va.z*vb.y, va.z*vb.x - va.x*vb.z, va.x*vb.y - va.y*vb.x); }
-float length(Vec3f v) { return sqrt(v.x*v.x + v.y*v.y + v.z*v.z); }
-Vec3f normalize(Vec3f v) { return v*(1.0f / length(v)); }
-
-Matrix LookAtMatrix(Vec3f stayAt, Vec3f lookAt)
-{
-    Vec3f z = normalize(lookAt - stayAt), x = normalize(cross(Vec3f(0.0, 1.0, 0.0), z)), y = cross(z, x);
-    return Matrix(
-        x.x, x.y, x.z, 0.0,
-        y.x, y.y, y.z, 0.0,
-        z.x, z.y, z.z, 0.0,
-        stayAt.x, stayAt.y, stayAt.z, 1.0
-    );
-}
-
-
-Matrix fake_inverse(Matrix mat)
-{
-    Matrix res = Matrix(
-        mat.m[0][0], mat.m[1][0], mat.m[2][0], 0.0f,
-        mat.m[0][1], mat.m[1][1], mat.m[2][1], 0.0f,
-        mat.m[0][2], mat.m[1][2], mat.m[2][2], 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f
-    );
-    Vec3f b = res*Vec3f(-mat.m[3][0], -mat.m[3][1], -mat.m[3][2]);
-    res.m[3][0] = b.x;
-    res.m[3][1] = b.y;
-    res.m[3][2] = b.z;
-    return res;
-}
-
-struct Vertex
-{
-    Vec3f pos;
-    Vec3f normal;
-    Vec3f color;
-    float flag;
-};
-
-struct TriInd
-{
-    uint32_t i0, i1, i2;
-    TriInd() { i0 = i1 = i2 = 0; }
-    TriInd(uint32_t _i0, uint32_t _i1, uint32_t _i2) { i0 = _i0; i1 = _i1; i2 = _i2; }
-    TriInd operator + (const uint32_t offset) { return TriInd(i0+offset, i1+offset, i2+offset); }
-};
-
-Vec3f sphere_vertices[BALL_ACCURACY * (BALL_ACCURACY - 1) + 2];
-TriInd sphere_indices[(BALL_ACCURACY - 1) * BALL_ACCURACY * 2];
-
-Vertex vertex_buffer[(BALL_ACCURACY * (BALL_ACCURACY - 1) + 2) * 64 + 128];
-TriInd index_buffer[(BALL_ACCURACY - 1) * BALL_ACCURACY * 2 * 64 + 128];
-uint32_t cnt_vertex, cnt_index;
-
-uint32_t vertex_buffer_object;
-uint32_t index_buffer_object;
-
-uint32_t shader_program_object;
-
-uint32_t depth_map_object;
-uint32_t depth_map_framebuffer_object;
-uint32_t depth_shader_program_object;
 
 uint32_t CompileGLSLShaderFromFile(
     const char* shader_file_path,
@@ -246,7 +498,7 @@ uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
     {
         int32_t log_length;
         glGetProgramiv(program_object, GL_INFO_LOG_LENGTH, &log_length);
-        char * error_info = new char [log_length + 1];
+        char* error_info = new char[log_length + 1];
         glGetProgramInfoLog(program_object, log_length + 1, &log_length, error_info);
         std::cout << error_info << std::endl;
         glDeleteProgram(program_object);
@@ -256,7 +508,6 @@ uint32_t LinkProgram(uint32_t vs_object, uint32_t fs_object)
     return program_object;
 }
 
-/* 这个函数用于初始化渲染过程中用到的资源 */
 void InitAssets()
 {
     sphere_vertices[0] = Vec3f(0.0f, 0.0f, 1.0f);
@@ -325,6 +576,13 @@ void InitAssets()
     glReadBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+    glProgramUniform1i(shader_program_object, glGetUniformLocation(shader_program_object, "shadow_sample"), shadow_sample);
+    glProgramUniform1f(shader_program_object, glGetUniformLocation(shader_program_object, "point_light_brightness"), point_light_brightness);
+    glProgramUniform1f(shader_program_object, glGetUniformLocation(shader_program_object, "Kq"), Kq);
+    glProgramUniform1f(shader_program_object, glGetUniformLocation(shader_program_object, "Kp"), Kp);
+    glProgramUniform1f(shader_program_object, glGetUniformLocation(shader_program_object, "Kc"), Kc);
+    glProgramUniform3fv(shader_program_object, glGetUniformLocation(shader_program_object, "parallel_light_brightness"), 1, parallel_light_brightness);
+    glProgramUniform3fv(shader_program_object, glGetUniformLocation(shader_program_object, "ambient_light_brightness"), 1, ambient_light_brightness);
 }
 
 void ResetScene()
@@ -353,53 +611,49 @@ void LoadTriangle(Vec3f v0, Vec3f v1, Vec3f v2, Vec3f color)
     cnt_index += 1;
 }
 
-void LoadSphere(Vec3f origin, float radius, Vec3f color, float flag = 0.0)
+void LoadSphere(Vec3f origin, float radius, Vec3f color, int flag)
 {
-    for (int i = 0; i < BALL_ACCURACY*(BALL_ACCURACY - 1)+2; i++)
+    for (int i = 0; i < BALL_ACCURACY * (BALL_ACCURACY - 1) + 2; i++)
     {
-        vertex_buffer[i+cnt_vertex].pos = sphere_vertices[i] * radius + origin;
-        vertex_buffer[i+cnt_vertex].normal = sphere_vertices[i];
-        vertex_buffer[i+cnt_vertex].color = color;
-        vertex_buffer[i+cnt_vertex].flag = flag;
+        vertex_buffer[i + cnt_vertex].pos = sphere_vertices[i] * radius + origin;
+        vertex_buffer[i + cnt_vertex].normal = sphere_vertices[i];
+        vertex_buffer[i + cnt_vertex].color = color;
+        vertex_buffer[i + cnt_vertex].flag = flag;
     }
-    for (int i = 0; i < BALL_ACCURACY * (BALL_ACCURACY - 1) *2; i++)
+    for (int i = 0; i < BALL_ACCURACY * (BALL_ACCURACY - 1) * 2; i++)
         index_buffer[i + cnt_index] = sphere_indices[i] + cnt_vertex;
     cnt_vertex += BALL_ACCURACY * (BALL_ACCURACY - 1) + 2;
     cnt_index += BALL_ACCURACY * (BALL_ACCURACY - 1) * 2;
 }
 
-Vec3f balls_pos[64];
-Vec3f balls_velocity[64];
-Vec3f balls_color[64];
-
 void InitBalls()
 {
-    std::mt19937 rd(2022);
+    std::mt19937 rd(RANDOM_SEED);
     std::uniform_real_distribution<float> d(-1.0, 1.0);
     std::uniform_real_distribution<float> d_color(0.0, 1.0);
     for (int i = 0; i < 4; i++)
         for (int j = 0; j < 4; j++)
-            for (int  k = 0; k < 4; k++)
+            for (int k = 0; k < 4; k++)
             {
-                balls_pos[i*16 + j*4 + k] = Vec3f(
+                balls_pos[i * 16 + j * 4 + k] = Vec3f(
                     -3.0 + i * 2.0,
                     -3.0 + j * 2.0,
                     -3.0 + k * 2.0
                 );
-                balls_velocity[i*16 + j*4 + k] = Vec3f(d(rd), d(rd), d(rd));
-                balls_color[i*16 + j*4 + k] = Vec3f(d_color(rd), d_color(rd), d_color(rd));
+                balls_velocity[i * 16 + j * 4 + k] = Vec3f(d(rd), d(rd), d(rd));
+                balls_color[i * 16 + j * 4 + k] = Vec3f(d_color(rd), d_color(rd), d_color(rd));
             }
     for (int i = 0; i < 8; i++)
     {
-        balls_color[(i << 3) | i] = balls_color[(i << 3) | i] * (1.0 / 
-        fmaxf(
+        balls_color[(i << 3) | i] = balls_color[(i << 3) | i] * (1.0 /
             fmaxf(
-                balls_color[(i << 3) | i].y,
-                balls_color[(i << 3) | i].z
-            ),
-            balls_color[(i << 3) | i].x
-        )
-        );
+                fmaxf(
+                    balls_color[(i << 3) | i].y,
+                    balls_color[(i << 3) | i].z
+                ),
+                balls_color[(i << 3) | i].x
+            )
+            );
     }
 }
 
@@ -407,7 +661,7 @@ void BallCollision(int i, int j)
 {
     Vec3f direction = normalize(balls_pos[j] - balls_pos[i]);
     Vec3f relative_velocity = balls_velocity[i] - balls_velocity[j];
-    Vec3f impulse = direction * fmaxf(dot(direction, relative_velocity), 0.0f) * (0.5 + 0.5*elastic);
+    Vec3f impulse = direction * fmaxf(dot(direction, relative_velocity), 0.0f) * (0.5 + 0.5 * elastic);
     balls_velocity[j] = balls_velocity[j] + impulse;
     balls_velocity[i] = balls_velocity[i] - impulse;
 }
@@ -415,7 +669,7 @@ void BallCollision(int i, int j)
 void UpdateBalls(float time_step)
 {
     for (int i = 0; i < 64; i++)
-        balls_velocity[i].y -= 9.8*time_step;
+        balls_velocity[i].y -= 9.8 * time_step;
     for (int t = 0; t < 5; t++)
     {
         for (int i = 0; i < 64; i++)
@@ -462,206 +716,8 @@ void LoadScene()
     LoadTriangle(Vec3f(5.0, -5.0, 5.0), Vec3f(5.0, 5.0, 5.0), Vec3f(5.0, -5.0, -5.0), Vec3f(1.0, 0.7, 0.7));
 
     for (int i = 0; i < 64; i++)
-        LoadSphere(balls_pos[i], ball_radius, balls_color[i], ((i & 7) == (i >> 3)) ? 1.0f : 0.0);
-    
+        LoadSphere(balls_pos[i], ball_radius, balls_color[i], ((i & 7) == (i >> 3)) ? 1 : 0);
+
     glNamedBufferSubData(vertex_buffer_object, 0, sizeof(Vertex) * cnt_vertex, vertex_buffer);
     glNamedBufferSubData(index_buffer_object, 0, sizeof(TriInd) * cnt_index, index_buffer);
-}
-
-int main(void)
-{
-    GLFWwindow* window;
-
-    /* 初始化 GLFW 库 */
-    if (!glfwInit())
-        return -1;
-
-    /* 创建窗口 */
-    glfwWindowHint(GLFW_SAMPLES, 4);
-    window = glfwCreateWindow(768, 768, "Lighting", NULL, NULL);
-    if (!window)
-    {
-        glfwTerminate();
-        return -1;
-    }
-
-    /* 将窗口设置为当前上下文 */
-    glfwMakeContextCurrent(window);
-
-    /* 初始化 GLAD 库，在这一步之后才能调用 glXXX 函数 */
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-    {
-        glfwTerminate();
-        return -1;
-    }
-
-    /* 显示设备信息以及 GL 版本 */
-    std::cout << "GPU:         " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "GPU Vendor:  " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "GL Version:  " << glGetString(GL_VERSION) << std::endl;
-
-    /* 调用初始化函数 */
-
-    InitAssets();
-
-    int32_t 
-    mat_proj_location, 
-    mat_trans_location, 
-    parallel_light_direction_location, 
-    depth_mat_trans_location, 
-    mat_depth_location,
-    lights_pos_location,
-    lights_brightness_location;
-    mat_proj_location = glGetUniformLocation(shader_program_object, "mat_proj");
-    mat_trans_location = glGetUniformLocation(shader_program_object, "mat_trans");
-    parallel_light_direction_location = glGetUniformLocation(shader_program_object, "parallel_light_direction");
-    depth_mat_trans_location = glGetUniformLocation(depth_shader_program_object, "mat_trans");
-    mat_depth_location = glGetUniformLocation(shader_program_object, "mat_depth");
-    lights_pos_location = glGetUniformLocation(shader_program_object, "lights_pos");
-    lights_brightness_location = glGetUniformLocation(shader_program_object, "lights_brightness");
-
-    glfwSwapInterval(0);
-
-    Matrix CameraRotation = RotationMatrix(0.19*pi, 0.225*pi, 0.0);
-    Vec3f CameraTranslation = Vec3f(9.0, 9.0f, -11.0f);
-
-    InitBalls();
-
-    double camera_pitch = 0.19*pi, camera_yaw = 0.225*pi;
-    double last_x = 0.0, last_y = 0.0;
-    int last_click = 0;
-
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-
-    std::chrono::steady_clock::time_point tp = std::chrono::steady_clock::now();
-
-    Vec3f parallel_light_direction = Vec3f(-3.0, -1.0, 2.0);
-
-    Vec3f lights_pos[8];
-    Vec3f lights_brightness[8];
-
-    /* 消息循环 */
-    while (!glfwWindowShouldClose(window))
-    {
-        /* 帧绘制用时统计 */
-        std::chrono::steady_clock::time_point this_tp = std::chrono::steady_clock::now();
-        //std::cout << "Last frame time used: " << (this_tp - tp) / std::chrono::milliseconds(1) << "ms\n";
-        tp = this_tp;
-
-        /* 更新光源方向 */
-        parallel_light_direction = RotationMatrix(0.0, 0.003, 0.0) * parallel_light_direction;
-        Matrix depth_map_mat_trans = Matrix(
-            0.12, 0.0, 0.0, 0.0,
-            0.0, 0.12, 0.0, 0.0,
-            0.0, 0.0, 1.0 / 25.0, 0.0,
-            0.0, 0.0, -1.0, 1.0
-        ) * fake_inverse(LookAtMatrix(parallel_light_direction * -10.0, Vec3f(0.0, 0.0, 0.0)));
-        glProgramUniformMatrix4fv(depth_shader_program_object, depth_mat_trans_location, 1, false, (float*)&depth_map_mat_trans);
-        glProgramUniformMatrix4fv(shader_program_object, mat_depth_location, 1, false, (float*)&depth_map_mat_trans);
-        glProgramUniform3fv(shader_program_object, parallel_light_direction_location, 1, (float*)&parallel_light_direction);
-
-        /* 加载场景 */
-        LoadScene();
-        for (int i = 0; i < 8; i++)
-        {
-            int ball_index = ((i << 3) | i);
-            lights_pos[i] = balls_pos[ball_index];
-            lights_brightness[i] = balls_color[ball_index];
-        }
-
-        glProgramUniform3fv(shader_program_object, lights_brightness_location, 8, (float*)lights_brightness);
-        glProgramUniform3fv(shader_program_object, lights_pos_location, 8, (float*)lights_pos);
-
-
-        /* 渲染阴影图 */
-
-        glBindFramebuffer(GL_FRAMEBUFFER, depth_map_framebuffer_object);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-        glUseProgram(depth_shader_program_object);
-        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
-        glEnableVertexAttribArray(0);
-        glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
-        glDisableVertexAttribArray(0);
-
-        /* 渲染最终画面 */
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glClearColor(0.0, 0.0, 0.0, 1.0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glClear(GL_DEPTH_BUFFER_BIT);
-
-        int32_t width, height;
-        glfwGetWindowSize(window, &width, &height);
-        glViewport(0, 0, width, height);
-        glUseProgram(shader_program_object);
-        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_object);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_object);
-        glVertexAttribPointer(0, 3, GL_FLOAT, false, 40, (void*)0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, false, 40, (void*)12);
-        glVertexAttribPointer(2, 3, GL_FLOAT, false, 40, (void*)24);
-        glVertexAttribPointer(3, 1, GL_FLOAT, false, 40, (void*)36);
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-        glEnableVertexAttribArray(2);
-        glEnableVertexAttribArray(3);
-
-        Matrix mat_proj, mat_trans;
-        mat_proj = ProjectionMatrix(1.0f, 100.0f, (float)width / (float)height, pi / 3.0);
-        mat_trans = fake_inverse(
-            TranslateMatrix(CameraTranslation.x, CameraTranslation.y, CameraTranslation.z) * CameraRotation
-        );
-        glUniformMatrix4fv(mat_proj_location, 1, 0, (float*)&mat_proj);
-        glUniformMatrix4fv(mat_trans_location, 1, 0, (float*)&mat_trans);
-
-        glBindTexture(GL_TEXTURE_2D, depth_map_object);
-        glDrawElements(GL_TRIANGLES, cnt_index * 3, GL_UNSIGNED_INT, nullptr);
-
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
-        glDisableVertexAttribArray(2);
-        glDisableVertexAttribArray(3);
-
-        /* 交换缓冲 */
-        glfwSwapBuffers(window);
-
-        /* 处理窗口消息 */
-        glfwPollEvents();
-
-
-        /* 更新帧资源 */
-        for (int i = 0; i < 10; i++)
-            UpdateBalls(0.002);
-
-
-        /* 处理输入 */
-        const float move_speed = 0.05;
-        if (glfwGetKey(window, GLFW_KEY_W)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_S)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[2][0], CameraRotation.m[2][1], CameraRotation.m[2][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_D)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_A)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[0][0], CameraRotation.m[0][1], CameraRotation.m[0][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_R)) CameraTranslation = CameraTranslation + Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
-        if (glfwGetKey(window, GLFW_KEY_F)) CameraTranslation = CameraTranslation - Vec3f(CameraRotation.m[1][0], CameraRotation.m[1][1], CameraRotation.m[1][2]) * move_speed;
-
-
-        {
-            double xpos, ypos;
-            glfwGetCursorPos(window, &xpos, &ypos);
-            int left_click = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-            if (left_click)
-            {
-                camera_pitch += (ypos - last_y) * 0.002;
-                camera_yaw -= (xpos - last_x) * 0.002;
-            }
-            last_x = xpos;
-            last_y = ypos;
-        }
-
-        CameraRotation = RotationMatrix(camera_pitch, camera_yaw, 0.0);
-    }
-
-    glfwTerminate();
-    return 0;
 }

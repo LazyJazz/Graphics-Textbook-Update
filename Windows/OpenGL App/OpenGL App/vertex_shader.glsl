@@ -3,12 +3,12 @@
 layout (location = 0) in vec3 vs_pos;
 layout (location = 1) in vec3 vs_norm;
 layout (location = 2) in vec3 vs_color;
-layout (location = 3) in float vs_flag;
+layout (location = 3) in int vs_flag;
 
 out vec3 fs_norm;
 out vec3 fs_pos;
 out vec3 fs_color;
-out float fs_flag;
+out int fs_flag;
 
 uniform mat4 mat_proj;
 uniform mat4 mat_trans;

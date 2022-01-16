@@ -1,27 +1,16 @@
 #version 450 core
 
-/**********************************/
-/*          可调参数              */
-
-/* 软阴影采样级别 [0, 10] */
-const int shadow_sample = 3;
-/* 点光源亮度系数 [0, inf) */
-const float point_light_brightness = 1.0;
-/* 点光源衰减系数 */
-const float Kq = 1.0, Kp = 0.0, Kc = 1.0;
-/* 平行光源亮度 */
-const vec3 parallel_light_brightness = vec3(1.0, 1.0, 1.0);
-/* 环境光亮度 */
-const vec3 ambient_light_brightness = vec3(0.1, 0.1, 0.1);
-
-/*                                */
-/**********************************/
+uniform int shadow_sample;
+uniform float point_light_brightness;
+uniform float Kq, Kp, Kc;
+uniform vec3 parallel_light_brightness;
+uniform vec3 ambient_light_brightness;
 
 
 in vec3 fs_norm;
 in vec3 fs_pos;
 in vec3 fs_color;
-in float fs_flag;
+flat in int fs_flag;
 
 out vec4 color0;
 
@@ -154,7 +143,7 @@ vec3 lighting(vec3 frag_pos, vec3 frag_norm, vec3 frag_color)
 
 void main()
 {
-    if (fs_flag > 0.5)
+    if (fs_flag == 1)
     {
         color0 = vec4(fs_color, 1.0);
     }
@@ -163,10 +152,10 @@ void main()
         vec3 frag_pos = (mat_trans * vec4(fs_pos, 1.0)).xyz;
         vec3 frag_norm = normalize(mat_trans * vec4(fs_norm, 0.0)).xyz;
         
-        color0 = vec4(fs_color * lighting(
+        color0 = vec4(lighting(
             frag_pos,
             frag_norm,
-            vec3(1.0, 1.0, 1.0)
+            fs_color
         ), 1.0);
     }
 }
